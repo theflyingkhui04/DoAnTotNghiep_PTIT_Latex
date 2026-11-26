@@ -1,18 +1,71 @@
-\TrangKhongSo{BẢNG PHÂN CÔNG CÔNG VIỆC}
-\begin{center}\textit{(Đính kèm đề cương chi tiết -- Phụ lục 1 theo PDF)}\end{center}
-\noindent\textbf{Nhóm:} \TenNhom\quad\textbf{Số:} \SoNhom
-\par\medskip
-\noindent\textbf{Thành viên:} \TenSinhVien; \SinhVienHai; \SinhVienBa.
-\par\bigskip
-\renewcommand{\arraystretch}{1.4}
-\noindent\begin{tabularx}{\linewidth}{|c|p{20mm}|X|p{27mm}|p{17mm}|}
+% Bang phan cong cong viec (Phu luc 1) - theo trang 4 Mau-huong-dan-quyen-DA-TN.pdf.
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{BẢNG PHÂN CÔNG CÔNG VIỆC}
+
+\begin{flushright}
+{\fontsize{12}{15}\selectfont PHỤ LỤC 1}
+\end{flushright}
+\vspace{-2mm}
+\begin{center}
+{\bfseries\fontsize{14}{18}\selectfont BẢNG PHÂN CÔNG CÔNG VIỆC\par}
+{\textit{\fontsize{12.5}{16}\selectfont (Đính kèm đề cương chi tiết)}\par}
+\end{center}
+\vspace{2mm}
+
+{\fontsize{12}{15}\selectfont
+\noindent\textbf{Họ và tên nhóm sinh viên, nhóm số \SoNhom\ (\TenNhom):}\par
+\noindent 1) \TenSinhVien\ -- Mã SV: \MaSinhVien\ (\VaiTroSinhVienMot); Lớp: \LopSinhVien\par
+\noindent 2) \TenSinhVienHai\ -- Mã SV: \MaSinhVienHai\ (\VaiTroSinhVienHai); Lớp: \LopSinhVien\par
+\noindent 3) \TenSinhVienBa\ -- Mã SV: \MaSinhVienBa\ (\VaiTroSinhVienBa); Lớp: \LopSinhVien\par
+}
+\vspace{3mm}
+
+{\fontsize{11}{14}\selectfont
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.25}
+\noindent\begin{tabularx}{\linewidth}{|c|c|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}p{29mm}|p{15mm}|}
 \hline
-\textbf{STT} & \textbf{Chương} & \textbf{Nội dung chi tiết} & \textbf{SV thực hiện} & \textbf{Chữ ký}\\\hline
-1 & Chương 1 & [Nội dung 1, 2, 3] & [Họ tên] & \\\hline
-2 & Chương 2 & [Nội dung 1, 2, 3] & [Họ tên] & \\\hline
-3 & Chương 3 & [Nội dung 1, 2, 3] & [Họ tên] & \\\hline
-4 & Chương 4 & [Nếu có] & [Họ tên] & \\\hline
-\end{tabularx}
-\vspace{18mm}
-\begin{flushright}\textbf{GIẢNG VIÊN HƯỚNG DẪN}\\[2mm]
-\textit{(Ký, ghi rõ họ tên)}\end{flushright}
+\textbf{STT} & \multicolumn{2}{c|}{\textbf{Nội dung chi tiết}} & \multicolumn{1}{c|}{\textbf{SV thực hiện}} & \multicolumn{1}{c|}{\textbf{Chữ ký}} \\
+\hline
+\multirow{5}{*}{1} & \multirow{5}{*}{Chương 1}
+  & Khảo sát nút thắt suy luận LLM (prefill, decode, KV cache) và bối cảnh ứng dụng tự triển khai.
+  & \TenSinhVienHai & \\ \cline{3-5}
+& & Cơ sở toán học giải mã suy đoán, tiêu chí chấp nhận lossless và họ kiến trúc bộ nháp EAGLE.
+  & \TenSinhVien & \\ \cline{3-5}
+& & Tổng quan điều chỉnh động ngân sách nháp, các chỉ số đánh giá và khoảng trống nghiên cứu.
+  & \TenSinhVienBa & \\ \hline
+\multirow{5}{*}{2} & \multirow{5}{*}{Chương 2}
+  & Phân tích bài toán, câu hỏi nghiên cứu, yêu cầu hệ thống và kiến trúc tổng thể FlexSDS.
+  & \TenSinhVien & \\ \cline{3-5}
+& & Thiết kế hồ sơ chi phí phần cứng, bộ điều khiển ba lớp và tích hợp bộ lập lịch bất đồng bộ vLLM.
+  & \TenSinhVien & \\ \cline{3-5}
+& & Thiết kế các làn đối chứng (vanilla, static, adaptive, EAGLE) và ứng dụng đo hóa đơn tiếng Việt.
+  & \TenSinhVienBa, \TenSinhVienHai & \\ \hline
+\multirow{5}{*}{3} & \multirow{5}{*}{Chương 3}
+  & Huấn luyện đầu nháp EAGLE-3.1, hiện thực tầng điều khiển, tích hợp vLLM và công cụ dòng lệnh FlexSDS.
+  & \TenSinhVien & \\ \cline{3-5}
+& & Hiện thực bộ đo tự động (benchmark harness), thu thập telemetry và hệ thống kiểm thử hồi quy.
+  & \TenSinhVienBa & \\ \cline{3-5}
+& & Hiện thực quy trình hóa đơn tiếng Việt (MC-OCR: JSON, Text-to-SQL, hỏi đáp) và web console minh họa.
+  & \TenSinhVienHai & \\ \hline
+\multirow{5}{*}{4} & \multirow{5}{*}{Chương 4}
+  & Thiết lập thực nghiệm trên GPU (T4, L4, A10G), chạy quét mức đồng thời 1--32 và đo chi phí thành phần.
+  & \TenSinhVienBa & \\ \cline{3-5}
+& & Đánh giá bộ điều khiển thích ứng trên EAGLE, kiểm chứng lossless và phân tích sai khác logprob.
+  & \TenSinhVien & \\ \cline{3-5}
+& & Đánh giá chất lượng nghiệp vụ quy trình hóa đơn, tổng hợp báo cáo, kết luận và tài liệu tham khảo.
+  & \TenSinhVienHai & \\ \hline
+\end{tabularx}\par}
+
+\vspace{8mm}
+\noindent\begin{minipage}{\linewidth}
+\begin{flushright}
+\begin{minipage}{65mm}
+\centering
+\textbf{GIẢNG VIÊN HƯỚNG DẪN}\\
+\textit{\footnotesize (Ký và ghi rõ họ tên)}\\[20mm]
+\TenGiangVien
+\end{minipage}
+\end{flushright}
+\end{minipage}

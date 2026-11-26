@@ -1,20 +1,30 @@
 \begin{titlepage}
 \thispagestyle{empty}
 \begin{center}
+ \begin{tikzpicture}[remember picture, overlay]
+   \draw[line width=1.6pt]
+     ($(current page.north west)+(19mm,-14mm)$)
+     rectangle
+     ($(current page.south east)+(-12mm,14mm)$);
+   \draw[line width=0.6pt]
+     ($(current page.north west)+(20.6mm,-15.6mm)$)
+     rectangle
+     ($(current page.south east)+(-13.6mm,15.6mm)$);
+ \end{tikzpicture}%
  {\bfseries\fontsize{14}{18}\selectfont \TenHocVien\par}
  {\bfseries\fontsize{14}{18}\selectfont \TenKhoa\par}
- \vspace{3mm}{\small\bfseries ------------------}\par
- \vspace{8mm}
- \includegraphics[width=2.65cm]{assets/logo-ptit.png}\par
- \vspace{16mm}
- {\bfseries\fontsize{24}{30}\selectfont ĐỒ ÁN TỐT NGHIỆP\par}
+ \vspace{2mm}\rule{46mm}{0.6pt}\par
+ \vspace{6mm}
+ \includegraphics[width=4.2cm]{assets/logo-ptit.png}\par
  \vspace{12mm}
- {\bfseries\fontsize{18}{23}\selectfont ĐỀ TÀI: \TenDeTai\par}
+ {\bfseries\fontsize{24}{30}\selectfont ĐỒ ÁN\\TỐT NGHIỆP ĐẠI HỌC\par}
+ \vspace{10mm}
+ {\bfseries\fontsize{17}{22}\selectfont ĐỀ TÀI: \TenDeTai\par}
 \end{center}
-\vspace{12mm}
+\vspace{10mm}
 {\fontsize{14}{19}\selectfont
 \noindent\textbf{Nhóm sinh viên thực hiện:}\par
-\vspace{3mm}
+\vspace{2.5mm}
 {\fontsize{13}{17}\selectfont
 \renewcommand{\arraystretch}{1.35}
 \noindent\begin{tabularx}{\linewidth}{|c|>{\raggedright\arraybackslash}X|c|c|}
@@ -28,11 +38,11 @@
 3 & \TenSinhVienBa & \MaSinhVienBa & \VaiTroSinhVienBa \\
 \hline
 \end{tabularx}}\par
-\vspace{8mm}
+\vspace{6mm}
 \noindent\begin{tabularx}{\linewidth}{@{}p{52mm}>{\raggedright\arraybackslash}X@{}}
 Lớp: & \LopSinhVien \\
 Khóa: & \KhoaHoc \\
-Hệ: & \HeDaoTao \\[4mm]
+Hệ: & \HeDaoTao \\[3mm]
 Giảng viên hướng dẫn: & \TenGiangVien \\
 \end{tabularx}\par}
 \vfill

@@ -1,27 +1,63 @@
-\TrangKhongSo{ĐỀ CƯƠNG ĐỒ ÁN TỐT NGHIỆP THEO NHÓM}
-% Tham khao trang 3 PDF; dung khi khoa yeu cau de cuong nhom.
-\noindent\textbf{Học viện:} \TenHocVien\par
-\noindent\textbf{Khoa:} \TenKhoa\quad\textbf{Bộ môn:} \TenBoMon\par
-\noindent\textbf{Tên nhóm:} \TenNhom\quad\textbf{Nhóm số:} \SoNhom\par
-\noindent\textbf{Sinh viên 1:} \TenSinhVien\ -- \LopSinhVien\par
-\noindent\textbf{Sinh viên 2:} \SinhVienHai\par
-\noindent\textbf{Sinh viên 3:} \SinhVienBa\par
-\medskip
-\noindent\textbf{Ngành đào tạo:} \HeDaoTao\par
-\noindent\textbf{1. Tên đồ án tốt nghiệp:} \TenDeTai\par
-\medskip
-\noindent\textbf{2. Nội dung, nhiệm vụ nghiên cứu} (không quá 1 trang):
-\begin{itemize}
- \item Chương 1: [Nội dung]\item Chương 2: [Nội dung]
- \item Chương 3: [Nội dung]\item Chương 4: [Nếu có]
-\end{itemize}
-\noindent\textbf{3. Tài liệu tham khảo:} [Liệt kê các tài liệu chính]\par
-\noindent\textbf{4. Ngày giao:} \NgayGiaoDeTai\par
-\noindent\textbf{5. Ngày nộp quyển:} \NgayNopQuyen
-\par\vspace{14mm}\noindent
-\begin{tabularx}{\linewidth}{@{}X X@{}}
-\centering\textbf{GIẢNG VIÊN HƯỚNG DẪN} & \centering\arraybackslash\textbf{TRƯỞNG NHÓM SINH VIÊN}\\
-\centering\footnotesize (Ký, ghi rõ họ tên) & \centering\arraybackslash\footnotesize (Ký, ghi rõ họ tên)\\[27mm]
-\multicolumn{2}{c}{\textbf{TRƯỞNG BỘ MÔN}}\\
-\multicolumn{2}{c}{\footnotesize (Ký, ghi rõ họ tên)}
+% De cuong do an tot nghiep theo nhom - theo trang 3 Mau-huong-dan-quyen-DA-TN.pdf.
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{ĐỀ CƯƠNG ĐỒ ÁN TỐT NGHIỆP THEO NHÓM}
+
+\noindent\begin{tabularx}{\linewidth}{@{} >{\centering\arraybackslash}p{82mm} @{\hspace{4mm}} >{\centering\arraybackslash}X @{}}
+{\fontsize{9.5}{12}\selectfont \TenHocVien} & {\fontsize{9.5}{12}\selectfont CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM} \\
+{\fontsize{10}{13}\selectfont \TenKhoa} & {\bfseries\fontsize{10.5}{13}\selectfont Độc lập -- Tự do -- Hạnh phúc} \\
+{\bfseries\fontsize{10}{13}\selectfont BỘ MÔN: \TenBoMon} & \rule{36mm}{0.5pt} \\[-2pt]
+\rule{36mm}{0.5pt} & \\
 \end{tabularx}
+
+\vspace{6mm}
+\begin{center}
+{\bfseries\fontsize{14}{18}\selectfont ĐỀ CƯƠNG ĐỒ ÁN TỐT NGHIỆP THEO NHÓM\par}
+\end{center}
+\vspace{3mm}
+
+{\fontsize{12.5}{16}\selectfont
+\noindent\textbf{Họ và tên nhóm sinh viên, nhóm số \SoNhom\ (\TenNhom):}\par
+\noindent 1) \TenSinhVien\ -- Mã SV: \MaSinhVien\ (\VaiTroSinhVienMot); Lớp: \LopSinhVien\par
+\noindent 2) \TenSinhVienHai\ -- Mã SV: \MaSinhVienHai\ (\VaiTroSinhVienHai); Lớp: \LopSinhVien\par
+\noindent 3) \TenSinhVienBa\ -- Mã SV: \MaSinhVienBa\ (\VaiTroSinhVienBa); Lớp: \LopSinhVien\par
+\smallskip
+\noindent\textbf{Khóa:} \KhoaHoc\par
+\noindent\textbf{Ngành và hệ đào tạo:} \HeDaoTao\par
+\smallskip
+\noindent\textbf{1/ Tên đồ án tốt nghiệp:} \TenDeTai\par
+\smallskip
+\noindent\textbf{2/ Nội dung, nhiệm vụ nghiên cứu} \textit{(không quá 1 trang, không quá chi tiết):}
+\begin{itemize}
+ \setlength{\itemsep}{2pt}
+ \setlength{\parskip}{0pt}
+ \item \textbf{Chương 1 -- Cơ sở lý thuyết và các nghiên cứu liên quan:} Khảo sát quá trình suy luận mô hình ngôn ngữ lớn (prefill, decode, KV cache, giới hạn băng thông bộ nhớ), cơ sở toán học của giải mã suy đoán và tính lossless, các kiến trúc bộ nháp (mô hình nháp độc lập, Medusa, họ EAGLE, xác thực theo cây), các phương pháp điều chỉnh động ngân sách nháp và khoảng trống nghiên cứu.
+ \item \textbf{Chương 2 -- Phân tích và thiết kế hệ thống:} Phân tích bài toán, câu hỏi nghiên cứu và yêu cầu hệ thống; thiết kế kiến trúc tổng thể FlexSDS, hồ sơ chi phí phần cứng, bộ điều khiển ngân sách nháp ba lớp, cơ chế tích hợp vào bộ lập lịch bất đồng bộ của vLLM 0.30.0, các làn đối chứng và ứng dụng đo hóa đơn tiếng Việt.
+ \item \textbf{Chương 3 -- Triển khai và hiện thực hệ thống:} Trình bày môi trường công nghệ, cấu trúc mã nguồn, quy trình huấn luyện đầu nháp EAGLE-3.1 cho Qwen2.5-7B-Instruct, hiện thực tầng điều khiển, tầng tích hợp vLLM, công cụ dòng lệnh FlexSDS, quy trình xử lý hóa đơn tiếng Việt (MC-OCR), bộ đo tự động, web console minh họa và kiểm thử.
+ \item \textbf{Chương 4 -- Thực nghiệm và đánh giá:} Thiết lập thực nghiệm trên ba GPU (NVIDIA T4, L4, A10G) với ba nhóm workload từ MC-OCR ở mức đồng thời 1--32; đánh giá tốc độ, chi phí thành phần, hiệu quả hai phiên bản bộ điều khiển thích ứng, kiểm chứng tính lossless bằng phân tích logprob, đánh giá chất lượng nghiệp vụ và thảo luận hạn chế.
+\end{itemize}
+\noindent\textbf{3/ Tài liệu tham khảo chính:}
+\begin{itemize}
+ \setlength{\itemsep}{1pt}
+ \setlength{\parskip}{0pt}
+ \item Leviathan Y., Kalman M., Matias Y. (2023), \textit{Fast Inference from Transformers via Speculative Decoding}, ICML 2023.
+ \item Li Y. và cộng sự (2024, 2025), \textit{EAGLE, EAGLE-2 và EAGLE-3: Speculative Sampling with Feature-Level Drafting and Dynamic Draft Trees}, ICML 2024, EMNLP 2024, NeurIPS 2025.
+ \item Kwon W. và cộng sự (2023), \textit{Efficient Memory Management for Large Language Model Serving with PagedAttention (vLLM)}, SOSP 2023.
+ \item Liu T. và cộng sự (2025, 2026), \textit{PEARL}, \textit{TALON} và \textit{D-cut} (điều chỉnh động ngân sách giải mã suy đoán).
+ \item Vu X.-S. và cộng sự (2021), \textit{MC-OCR Challenge: Mobile-Captured Image Document Recognition for Vietnamese Receipts}, RIVF 2021.
+\end{itemize}
+\noindent\textbf{4/ Ngày giao:} \NgayGiaoDeTai\par
+\noindent\textbf{5/ Ngày nộp quyển:} \NgayNopQuyen\par
+
+\vspace{8mm}
+\noindent\begin{minipage}{\linewidth}
+\begin{tabularx}{\linewidth}{@{} >{\centering\arraybackslash}X >{\centering\arraybackslash}X @{}}
+ & \textit{Hà Nội, ngày \NgayBaoVe\ tháng \ThangBaoVe\ năm \NamBaoVe} \\[2pt]
+\textbf{CÁN BỘ, GIẢNG VIÊN HƯỚNG DẪN} & \textbf{TRƯỞNG NHÓM SINH VIÊN} \\
+\textit{\footnotesize (Ký, ghi rõ họ tên)} & \textit{\footnotesize (Ký, ghi rõ họ tên)} \\[22mm]
+\TenGiangVien & \TenSinhVien \\[6mm]
+\multicolumn{2}{c}{\textbf{TRƯỞNG BỘ MÔN}} \\
+\multicolumn{2}{c}{\textit{\footnotesize (Ký, ghi rõ họ tên)}} \\
+\end{tabularx}
+\end{minipage}
+}

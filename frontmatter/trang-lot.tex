@@ -1,16 +1,45 @@
-% Trang lot la yeu cau cua mau khoa Vien thong 1, mac dinh tat cho mau ATTT.
+% Trang lot (trang dem giay trang) theo trang 2 Mau-huong-dan-quyen-DA-TN.pdf.
 \begin{titlepage}
 \thispagestyle{empty}
 \begin{center}
-{\bfseries\TenHocVien\par \TenKhoa\par}
-\vspace{38mm}
-{\fontsize{22}{27}\bfseries ĐỒ ÁN\\TỐT NGHIỆP ĐẠI HỌC\par}
-\vspace{24mm}
-{\fontsize{17}{21}\bfseries Đề tài: \TenDeTai\par}
+ \begin{tikzpicture}[remember picture, overlay]
+   \draw[line width=1.2pt]
+     ($(current page.north west)+(19mm,-14mm)$)
+     rectangle
+     ($(current page.south east)+(-12mm,14mm)$);
+ \end{tikzpicture}%
+ {\bfseries\fontsize{14}{18}\selectfont \TenHocVien\par}
+ {\bfseries\fontsize{14}{18}\selectfont \TenKhoa\par}
+ \vspace{2mm}\rule{46mm}{0.6pt}\par
+ \vspace{26mm}
+ {\bfseries\fontsize{24}{30}\selectfont ĐỒ ÁN\\TỐT NGHIỆP ĐẠI HỌC\par}
+ \vspace{16mm}
+ {\bfseries\fontsize{17}{22}\selectfont \textit{Đề tài:} \TenDeTai\par}
 \end{center}
-\vspace{30mm}
-\noindent\textbf{Sinh viên thực hiện:} \TenSinhVien\par
-\noindent\textbf{Giảng viên hướng dẫn:} \TenGiangVien
+\vspace{16mm}
+{\fontsize{14}{19}\selectfont
+\noindent\textbf{\textit{Sinh viên thực hiện:}}\par
+\vspace{3mm}
+{\fontsize{13}{17}\selectfont
+\renewcommand{\arraystretch}{1.35}
+\noindent\begin{tabularx}{\linewidth}{|c|>{\raggedright\arraybackslash}X|c|c|}
+\hline
+\textbf{STT} & \multicolumn{1}{c|}{\textbf{Họ và tên}} & \textbf{Mã sinh viên} & \textbf{Vai trò} \\
+\hline
+1 & \TenSinhVien & \MaSinhVien & \VaiTroSinhVienMot \\
+\hline
+2 & \TenSinhVienHai & \MaSinhVienHai & \VaiTroSinhVienHai \\
+\hline
+3 & \TenSinhVienBa & \MaSinhVienBa & \VaiTroSinhVienBa \\
+\hline
+\end{tabularx}}\par
+\vspace{8mm}
+\noindent\begin{tabularx}{\linewidth}{@{}p{52mm}>{\raggedright\arraybackslash}X@{}}
+\textbf{\textit{Lớp:}} & \LopSinhVien \\
+\textbf{\textit{Khóa:}} & \KhoaHoc \\
+\textbf{\textit{Hệ đào tạo:}} & \HeDaoTao \\[4mm]
+\textbf{\textit{Giảng viên hướng dẫn:}} & \TenGiangVien \\
+\end{tabularx}\par}
 \vfill
-\begin{center}Hà Nội, năm \NamBaoVe\end{center}
+\begin{center}{\fontsize{14}{18}\selectfont Hà Nội, năm \NamBaoVe}\end{center}
 \end{titlepage}
