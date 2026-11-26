@@ -1,0 +1,23 @@
+\begin{table}[htbp]
+\centering
+\caption{Hệ số tăng tốc của các làn trong chiến dịch M2-04 trên T4}
+\label{tab:m2}
+\small
+\begin{tabular}{@{}llrrrrrrr@{}}
+\toprule
+\textbf{W} & \textbf{Làn} & $c=1$ & $c=2$ & $c=4$ & $c=8$ & $c=16$ & $c=32$ & $\bar\alpha$ \\
+\midrule
+W1 & \texttt{static} & 1{,}28 & 1{,}26 & 1{,}31 & 1{,}24 & 1{,}21 & 1{,}15 & 0{,}92 \\
+ & \texttt{adaptive} v0 & 1{,}31 & 1{,}21 & 1{,}16 & 1{,}13 & 1{,}09 & 1{,}04 & 0{,}92 \\
+\midrule
+W2 & \texttt{static} & 1{,}26 & 1{,}24 & 1{,}24 & 1{,}19 & 1{,}14 & 1{,}00 & 0{,}81 \\
+ & \texttt{adaptive} v0 & 1{,}19 & 1{,}07 & \textbf{0{,}84} & \textbf{0{,}75} & \textbf{0{,}80} & \textbf{0{,}84} & 0{,}81 \\
+\midrule
+W3 & \texttt{static} & \textbf{0{,}97} & \textbf{0{,}96} & \textbf{0{,}97} & \textbf{0{,}91} & \textbf{0{,}87} & \textbf{0{,}77} & 0{,}55 \\
+ & \texttt{adaptive} v0 & \textbf{0{,}75} & \textbf{0{,}69} & \textbf{0{,}65} & \textbf{0{,}58} & \textbf{0{,}59} & \textbf{0{,}67} & 0{,}62 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+{\footnotesize Hệ số tăng tốc theo TPOT so với \texttt{vanilla} cùng ô; giá trị nhỏ hơn 1 in đậm. $\bar\alpha$: trung bình của $\alpha$ qua sáu mức đồng thời. Nguồn: \path{experiments/results/m2_summary.csv}.}
+\end{table}

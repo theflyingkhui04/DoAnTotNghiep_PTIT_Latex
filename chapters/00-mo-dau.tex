@@ -1,0 +1,33 @@
+\TrangKhongSo{MỞ ĐẦU}
+
+\section*{Lý do chọn đề tài}
+
+Mô hình ngôn ngữ lớn đang trở thành thành phần nền tảng của các quy trình tự động hoá, đặc biệt qua các nền tảng điều phối như n8n, Dify hay LangGraph, nơi nhiều lời gọi mô hình được ghép nối tiếp thành một quy trình. Với các tổ chức cần bảo mật dữ liệu, cần hoạt động offline hoặc cần không phụ thuộc vào các nhà cung cấp API bên thứ ba, lựa chọn thực tế là tự triển khai mô hình mã nguồn mở trên phần cứng GPU của mình hoặc các dịch vụ serverless. Khi đó, chi phí trên mỗi token không mất đi mà chuyển thành thời gian GPU, dung lượng bộ nhớ và độ trễ. Trong các quy trình gọi mô hình nhiều lượt tuần tự, độ trễ của từng lời gọi cộng dồn lại, nên tốc độ sinh token trở thành nút thắt của cả quy trình.
+
+Giải mã suy đoán là kỹ thuật tăng tốc sinh token mà không làm thay đổi phân phối đầu ra: một bộ nháp rẻ đề xuất trước nhiều token, mô hình đích xác thực chúng trong một lượt tính. Các phương pháp tiêu biểu như EAGLE-2 báo cáo hệ số tăng tốc 3--4 lần, nhưng chủ yếu được đánh giá trên GPU cao cấp với một yêu cầu tại một thời điểm. Lợi ích của giải mã suy đoán phụ thuộc vào tỉ lệ chấp nhận của bộ nháp, vào tỉ lệ chi phí giữa bộ nháp và mô hình đích trên đúng GPU đang chạy, và vào số yêu cầu đồng thời. Trên thực tế, các yếu tố này có thể biến giải mã suy đoán thành gánh nặng, khiến hệ thống chạy chậm hơn cả decode thông thường. Cấu hình nháp trong các engine phục vụ lại được cố định lúc khởi động, trong khi các yếu tố trên thay đổi theo từng yêu cầu và từng thời điểm.
+
+Từ đó, nhóm chọn đề tài xây dựng một hệ thống phục vụ mô hình ngôn ngữ lớn giải mã suy đoán EAGLE, trong đó số token nháp được điều chỉnh trong lúc chạy dựa trên chi phí đo được trên phần cứng, và đánh giá hệ thống trên một quy trình xử lý hoá đơn tiếng Việt.
+
+\section*{Mục tiêu của đề tài}
+
+Mục tiêu tổng quát của đề tài là xây dựng và đánh giá FlexSDS - Flexible Speculative Decoding Serving, một hệ thống phục vụ mô hình ngôn ngữ lớn tương thích OpenAI, tích hợp giải mã suy đoán EAGLE với bộ điều khiển ngân sách nháp thích ứng theo phần cứng. Các mục tiêu cụ thể gồm: (1) xây dựng các làn phục vụ đối chứng trên vLLM (giải mã thường, suy đoán với ngân sách cố định) và một bộ đo tự động quét theo mức đồng thời; (2) thiết kế và hiện thực bộ điều khiển chọn số token nháp ở từng bước dựa trên tỉ lệ chấp nhận, kích thước batch, áp lực bộ nhớ và hồ sơ chi phí đo trên GPU, tích hợp vào bộ lập lịch của vLLM mà không sửa tiêu chí chấp nhận; (3) đóng gói hệ thống thành công cụ dòng lệnh có kiểm tra tương thích, đo hồ sơ phần cứng và khởi chạy cục bộ hoặc trên GPU đám mây; (4) đánh giá tốc độ, tính lossless và chất lượng nghiệp vụ trên quy trình hoá đơn tiếng Việt, từ đó rút ra khi nào nên và không nên bật giải mã suy đoán.
+
+Đề tài được định hướng bởi ba câu hỏi nghiên cứu. \textbf{RQ1}: việc chọn ngân sách nháp theo đặc tính đo được của phần cứng có cải thiện tốc độ so với cấu hình cố định trên GPU phổ thông không, trong khi vẫn giữ tính lossless? \textbf{RQ2}: cơ chế thích ứng có loại bỏ được tình trạng tăng tốc âm và tràn bộ nhớ không? \textbf{RQ3}: trong một quy trình tự động hoá thực tế, loại tác vụ nào thực sự được hưởng lợi từ giải mã suy đoán và ở mức nào?
+
+\section*{Đối tượng và phạm vi nghiên cứu}
+
+Đối tượng nghiên cứu là quá trình suy luận của mô hình ngôn ngữ lớn với giải mã suy đoán trong một engine phục vụ, và cơ chế điều khiển số token nháp trong lúc phục vụ. Phạm vi của đồ án được giới hạn như sau. Về mô hình, mô hình đích là Qwen2.5-7B-Instruct lượng tử hoá AWQ 4-bit; bộ nháp gồm mô hình Qwen2.5-0.5B-Instruct và một đầu nháp EAGLE-3.1 do nhóm tự huấn luyện. Về phần mềm, hệ thống dựa trên vLLM phiên bản 0.30.0. Về phần cứng, thực nghiệm chạy trên một GPU tại một thời điểm, gồm NVIDIA T4, L4 và A10G, với mức đồng thời từ 1 đến 32 yêu cầu. Về dữ liệu, các workload được xây dựng từ bộ dữ liệu hoá đơn bán lẻ tiếng Việt MC-OCR.
+
+Một số nội dung nằm ngoài phạm vi. Đồ án không cải thiện chất lượng đầu ra của mô hình, không huấn luyện hay tinh chỉnh mô hình đích, và không xây dựng ứng dụng nghiệp vụ kế toán; quy trình hoá đơn chỉ đóng vai trò dụng cụ đo. Do giới hạn của vLLM 0.30.0, đồ án chỉ điều khiển số token nháp dạng vô hướng; việc điều khiển cấu trúc cây nháp được để lại cho hướng phát triển.
+
+\section*{Phương pháp thực hiện}
+
+Đồ án kết hợp nghiên cứu lý thuyết, phát triển hệ thống và thực nghiệm. Về lý thuyết, nhóm khảo sát các công trình về giải mã suy đoán và xây dựng mô hình chi phí để phân tích điều kiện có lợi của kỹ thuật này. Về phát triển, hệ thống được thiết kế phân tầng để logic quyết định tách khỏi vLLM và kiểm thử được trên CPU; quá trình phát triển chia theo các mốc, mỗi quyết định thiết kế quan trọng được ghi lại cùng lý do. Về thực nghiệm, nhóm dùng các workload đóng băng, quét sáu mức đồng thời, lặp lại mỗi ô năm lần và báo cáo trung vị; tính lossless được kiểm tra bằng so khớp từng token, và các sai khác được truy nguyên bằng phân tích logprob. Mọi số liệu được lưu kèm phiên bản mã nguồn và mã băm dữ liệu để có thể truy ngược.
+
+\section*{Đóng góp của đồ án}
+
+Đồ án có các đóng góp sau. Thứ nhất, hệ thống FlexSDS hoàn chỉnh gồm bộ điều khiển ngân sách nháp ba lớp, tầng tích hợp vào bộ lập lịch bất đồng bộ của vLLM với cơ chế quy phản hồi đúng nguồn, và công cụ dòng lệnh đóng gói toàn bộ quy trình từ kiểm tra tương thích, đo hồ sơ phần cứng đến khởi chạy có xác minh. Thứ hai, một đầu nháp EAGLE-3.1 cho Qwen2.5-7B-Instruct do nhóm huấn luyện và công bố. Thứ ba, một bộ số liệu thực nghiệm có kiểm soát trên ba loại GPU và ba loại workload theo thang mức đồng thời, cho thấy rõ vùng có lợi và vùng tăng tốc âm của giải mã suy đoán trên GPU phổ thông. Thứ tư, phân tích định lượng vì sao hai phiên bản bộ điều khiển thích ứng chưa vượt được cấu hình cố định, cùng phân tích nguyên nhân số học của các sai khác đầu ra so với giải mã thường. Những kết quả âm tính này được trình bày đầy đủ và chỉ ra các điều kiện cần cho một bộ điều khiển thích ứng hiệu quả.
+
+\section*{Tóm tắt nội dung đồ án}
+
+Ngoài phần Mở đầu và Kết luận, đồ án gồm bốn chương. Chương~\ref{chap:tong-quan} trình bày cơ sở lý thuyết về suy luận mô hình ngôn ngữ lớn và giải mã suy đoán, tổng quan các kiến trúc bộ nháp và các phương pháp điều chỉnh ngân sách nháp, và xác định khoảng trống nghiên cứu. Chương~\ref{chap:thiet-ke} phân tích bài toán, xác định yêu cầu và trình bày thiết kế của hệ thống FlexSDS. Chương~\ref{chap:trien-khai} trình bày hiện thực các thành phần, việc huấn luyện đầu nháp EAGLE-3.1, quy trình hoá đơn, bộ đo và web console minh hoạ. Chương~\ref{chap:thu-nghiem} trình bày thiết lập, kết quả và thảo luận các thực nghiệm.

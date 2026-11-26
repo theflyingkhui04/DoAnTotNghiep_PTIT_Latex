@@ -1,0 +1,324 @@
+\chapter{Cơ sở lý thuyết và các nghiên cứu liên quan}
+\label{chap:tong-quan}
+
+Chương này trình bày nền tảng lý thuyết mà toàn bộ đồ án dựa vào. Mục~\ref{sec:suy-luan-llm} phân tích quá trình suy luận của mô hình ngôn ngữ lớn và giải thích vì sao pha sinh token bị giới hạn bởi băng thông bộ nhớ. Mục~\ref{sec:giai-ma-suy-doan} trình bày thuật toán giải mã suy đoán, chứng minh tính bảo toàn phân phối và xây dựng mô hình chi phí dùng xuyên suốt các chương sau. Mục~\ref{sec:kien-truc-nhap} và Mục~\ref{sec:dieu-chinh-dong} tổng quan các kiến trúc bộ nháp và các phương pháp điều chỉnh ngân sách nháp đã được công bố. Mục~\ref{sec:huong-khac} điểm qua các hướng tăng tốc khác đã được nhóm cân nhắc. Mục~\ref{sec:chi-so} định nghĩa các chỉ số đánh giá, và Mục~\ref{sec:khoang-trong} rút ra khoảng trống nghiên cứu mà đồ án hướng tới.
+
+%=====================================================================
+\section{Suy luận mô hình ngôn ngữ lớn}
+\label{sec:suy-luan-llm}
+
+\subsection{Sinh văn bản tự hồi quy}
+
+Các mô hình ngôn ngữ lớn LLM hiện nay hầu hết dựa trên kiến trúc Transformer chỉ gồm khối giải mã (\textit{decoder-only})~\cite{vaswani2017attention}. Với một chuỗi token đầu vào $x_{1:n}$, mô hình tính phân phối xác suất có điều kiện của token kế tiếp $p(x_{n+1}\mid x_{1:n})$ trên toàn bộ từ vựng $\mathcal{V}$. Xác suất của cả chuỗi được phân rã theo quy tắc chuỗi:
+\begin{equation}\label{eq:tu-hoi-quy}
+  p(x_{1:T}) = \prod_{t=1}^{T} p(x_t \mid x_{<t}).
+\end{equation}
+Quá trình sinh văn bản vì vậy mang tính \textit{tự hồi quy} (\textit{autoregressive}): token thứ $t$ chỉ được lấy mẫu sau khi đã biết mọi token đứng trước nó. Với giải mã tham lam (\textit{greedy decoding}, tương ứng nhiệt độ lấy mẫu bằng 0), token được chọn là $x_t = \arg\max_{v\in\mathcal{V}} p(v \mid x_{<t})$. Với nhiệt độ dương, token được lấy mẫu ngẫu nhiên từ phân phối đã chia nhiệt độ. Dù dùng cách nào, mỗi token mới đều đòi hỏi một lượt truyền xuôi (\textit{forward pass}) đầy đủ qua toàn bộ các tầng của mô hình, và các lượt này không thể song song hoá theo trục thời gian.
+
+\subsection{Hai pha prefill và decode, bộ nhớ đệm KV}
+
+Trong cơ chế tự chú ý (\textit{self-attention}), biểu diễn của token thứ $t$ được tính từ các vector khoá (\textit{key}) và giá trị (\textit{value}) của mọi token đứng trước. Để không phải tính lại các vector này ở mỗi bước, các hệ thống suy luận lưu chúng vào \textit{bộ nhớ đệm KV} (\textit{KV cache}). Nhờ đó, quá trình suy luận của một yêu cầu tách thành hai pha có đặc tính rất khác nhau. Ở pha \textit{prefill}, toàn bộ $n$ token của prompt được xử lý song song trong một lượt truyền xuôi để điền KV cache và sinh token đầu tiên; phép tính chủ yếu là nhân ma trận lớn nên pha này thường bị giới hạn bởi năng lực tính toán (\textit{compute-bound}). Ở pha \textit{decode}, mỗi lượt truyền xuôi chỉ xử lý một token mới cho mỗi yêu cầu, đọc lại toàn bộ trọng số và KV cache để sinh đúng một token. Thời gian của pha prefill quyết định chỉ số TTFT, còn thời gian của mỗi bước decode quyết định chỉ số TPOT (Mục~\ref{sec:chi-so}). Với các tác vụ có đầu ra dài như sinh JSON, sinh SQL hay viết báo cáo, phần lớn thời gian của một yêu cầu nằm ở pha decode.
+
+\subsection{Giới hạn băng thông bộ nhớ}
+\label{subsec:bang-thong}
+
+Mô hình \textit{roofline}~\cite{williams2009roofline} biểu diễn hiệu năng tối đa của một phép tính theo \textit{cường độ số học} (\textit{arithmetic intensity}) $I$, tức số phép toán thực hiện trên mỗi byte dữ liệu đọc từ bộ nhớ:
+\begin{equation}\label{eq:roofline}
+  P(I) = \min\bigl(P_{\text{peak}},\; I \cdot B_{\text{mem}}\bigr),
+\end{equation}
+trong đó $P_{\text{peak}}$ là năng lực tính toán đỉnh (FLOP/s) và $B_{\text{mem}}$ là băng thông bộ nhớ (byte/s). Khi $I < P_{\text{peak}}/B_{\text{mem}}$, phép tính bị giới hạn bởi băng thông (\textit{memory-bandwidth bound}): đơn vị tính toán phải chờ dữ liệu. Ở bước decode với batch nhỏ, mỗi trọng số chỉ được dùng cho một vài phép nhân--cộng trên mỗi lần đọc, nên cường độ số học rất thấp và thời gian một bước xấp xỉ bằng thời gian đọc toàn bộ trọng số~\cite{pope2023scaling}:
+\begin{equation}\label{eq:can-duoi-decode}
+  C_T \gtrsim \frac{M_{\text{weights}}}{B_{\text{mem}}},
+\end{equation}
+với $M_{\text{weights}}$ là dung lượng trọng số của mô hình. Ví dụ, mô hình đích của đồ án là Qwen2.5-7B-Instruct lượng tử hoá AWQ 4-bit~\cite{qwen2024qwen25,lin2024awq}, có dung lượng trọng số nạp vào GPU khoảng $5{,}29$~GiB theo log khởi động của vLLM. Trên GPU NVIDIA L4 với băng thông danh định $300$~GB/s~\cite{nvidia-l4}, cận dưới~\eqref{eq:can-duoi-decode} vào khoảng $19$~ms cho một bước decode. Phép đo của nhóm trên L4 cho thời gian một bước decode ở batch 1 là $19{,}15$~ms (Chương~\ref{chap:thu-nghiem}), tức gần sát cận dưới này. Quan sát đó cho thấy ở chế độ batch nhỏ, đơn vị tính toán của GPU phần lớn thời gian ở trạng thái chờ. Phần năng lực tính toán dư thừa này chính là nguồn lợi mà giải mã suy đoán khai thác: xử lý thêm vài token trong cùng một lượt truyền xuôi gần như không làm tăng thời gian, vì chi phí đọc trọng số đã phải trả.
+
+Giới hạn này thay đổi khi số yêu cầu đồng thời tăng lên. Với batch kích thước $B$, mỗi lần đọc trọng số được dùng cho $B$ token, cường độ số học tăng xấp xỉ tuyến tính theo $B$, và đến một ngưỡng nào đó bước decode chuyển sang chế độ bị giới hạn bởi tính toán. Đồng thời, phần đọc KV cache tăng theo $B \times L$ với $L$ là độ dài ngữ cảnh. Khi đó, mỗi token xử lý thêm trong lượt truyền xuôi không còn ``miễn phí'' nữa. Ranh giới giữa hai chế độ phụ thuộc trực tiếp vào tỉ lệ $P_{\text{peak}}/B_{\text{mem}}$ của từng dòng GPU, vào mức lượng tử hoá của mô hình và vào độ dài ngữ cảnh. Đây là lý do cùng một cấu hình giải mã suy đoán có thể có lợi trên GPU này nhưng gây chậm trên GPU khác, hoặc có lợi ở tải thấp nhưng gây chậm ở tải cao.
+
+\subsection{Các kỹ thuật phục vụ LLM liên quan}
+
+Các hệ thống phục vụ LLM hiện đại kết hợp nhiều kỹ thuật để tăng hiệu suất sử dụng GPU. \textit{Gộp lô liên tục} (\textit{continuous batching} hay \textit{iteration-level scheduling}), đề xuất trong Orca~\cite{yu2022orca}, cho phép thêm và bớt yêu cầu khỏi batch ở từng bước decode thay vì chờ cả batch kết thúc. \textit{PagedAttention}, nền tảng của vLLM~\cite{kwon2023vllm}, quản lý KV cache theo các khối cố định tương tự bộ nhớ ảo phân trang, giảm phân mảnh và cho phép phục vụ nhiều yêu cầu đồng thời hơn trên cùng dung lượng VRAM. FlashAttention~\cite{dao2022flashattention} tổ chức lại phép tính attention để giảm số lần truy cập bộ nhớ chính. Cuối cùng, \textit{lượng tử hoá trọng số} như GPTQ~\cite{frantar2023gptq} và AWQ~\cite{lin2024awq} biểu diễn trọng số bằng 4 bit thay vì 16 bit, giảm khoảng bốn lần dung lượng trọng số. Theo~\eqref{eq:can-duoi-decode}, lượng tử hoá rút ngắn trực tiếp thời gian một bước decode của mô hình đích, đồng thời giải phóng VRAM cho KV cache. Hệ quả này quan trọng đối với giải mã suy đoán và được phân tích ở Mục~\ref{subsec:phan-tich-tang-toc}.
+
+Đồ án sử dụng vLLM phiên bản 0.30.0~\cite{vllm-repo} làm động cơ phục vụ (\textit{serving engine}). vLLM cung cấp giao diện HTTP tương thích OpenAI (\texttt{/v1/chat/completions}), bộ lập lịch theo từng bước với gộp lô liên tục, PagedAttention và một khung giải mã suy đoán hỗ trợ nhiều loại bộ nháp. Các đặc điểm cụ thể của khung này được trình bày ở Chương~\ref{chap:thiet-ke}.
+
+%=====================================================================
+\section{Giải mã suy đoán}
+\label{sec:giai-ma-suy-doan}
+
+\subsection{Ý tưởng cơ bản}
+
+Giải mã suy đoán (\textit{speculative decoding}) được Leviathan và cộng sự~\cite{leviathan2023speculative} và, độc lập, Chen và cộng sự~\cite{chen2023speculative} đề xuất năm 2023. Phương pháp dùng hai thành phần. \textit{Mô hình đích} (\textit{target model}) $M_p$ là mô hình chất lượng cao, có phân phối $p(\cdot)$, và là chuẩn đúng của đầu ra. \textit{Bộ nháp} (\textit{drafter}) $M_q$ là một cơ chế rẻ hơn nhiều, có phân phối $q(\cdot)$, có thể là một mô hình nhỏ độc lập hoặc một đầu dự đoán gắn vào mô hình đích. Mỗi vòng lặp gồm ba bước. Ở bước \textit{sinh nháp}, $M_q$ chạy tự hồi quy $K$ bước để đề xuất chuỗi nháp $\tilde{x}_1,\dots,\tilde{x}_K$. Ở bước \textit{xác thực}, $M_p$ xử lý ngữ cảnh cùng $K$ token nháp trong \emph{một} lượt truyền xuôi, thu được các phân phối $p_1,\dots,p_{K+1}$ tại $K+1$ vị trí. Ở bước \textit{chấp nhận}, các token nháp được duyệt lần lượt theo tiêu chí chấp nhận (Mục~\ref{subsec:tieu-chi}); token bị bác bỏ đầu tiên được thay bằng một token lấy mẫu lại và vòng lặp kết thúc. Nếu mọi token nháp đều được chấp nhận, phân phối $p_{K+1}$ đã có sẵn cho phép lấy thêm một token thưởng (\textit{bonus token}). Như vậy mỗi lượt gọi mô hình đích sinh ra từ $1$ đến $K+1$ token thay vì đúng một token. Hình~\ref{fig:sd-timeline} minh hoạ sự khác biệt về dòng thời gian giữa giải mã tự hồi quy và giải mã suy đoán.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  x=1cm, y=1cm, font=\footnotesize,
+  box/.style={draw, minimum height=0.6cm, inner sep=1pt, anchor=west},
+  tgt/.style={box, fill=blue!15},
+  drf/.style={box, fill=orange!30},
+  ver/.style={box, fill=blue!35},
+]
+  % Tu hoi quy: moi buoc decode sinh 1 token
+  \node[anchor=east, font=\small] at (-0.15,1.7) {Tự hồi quy};
+  \foreach \i in {0,...,6} { \node[tgt, minimum width=1.45cm] at (\i*1.5,1.7) {1 token}; }
+  % Giai ma suy doan: 3 buoc nhap + 1 luot xac thuc
+  \node[anchor=east, font=\small] at (-0.15,0.5) {Suy đoán};
+  \foreach \s in {0,5.0} {
+    \foreach \j in {0,1,2} { \node[drf, minimum width=0.4cm] at (\s+\j*0.45,0.5) {}; }
+    \node[ver, minimum width=1.6cm] at (\s+1.4,0.5) {xác thực};
+  }
+  \node at (1.5,-0.2) {nhận 3 nháp + 1 thưởng};
+  \node at (6.5,-0.2) {nhận 1 nháp + 1 sửa};
+  \draw[-{Stealth}] (0,-0.65) -- (10.7,-0.65) node[right] {$t$};
+  % Chu giai
+  \node[drf, minimum width=0.4cm] (l1) at (0,-1.3) {};
+  \node[anchor=west] at (l1.east) {bước nháp ($C_D$)};
+  \node[ver, minimum width=0.4cm] (l2) at (3.4,-1.3) {};
+  \node[anchor=west] at (l2.east) {lượt xác thực ($C_V(K)$)};
+  \node[tgt, minimum width=0.4cm] (l3) at (7.4,-1.3) {};
+  \node[anchor=west] at (l3.east) {bước decode ($C_T$)};
+\end{tikzpicture}
+\caption{Dòng thời gian của giải mã tự hồi quy và giải mã suy đoán với $K=3$ (sơ đồ minh hoạ, không theo tỉ lệ đo)}
+\label{fig:sd-timeline}
+\end{figure}
+
+\subsection{Tiêu chí chấp nhận}
+\label{subsec:tieu-chi}
+
+Xét vị trí nháp thứ $i$, gọi $q(x)$ và $p(x)$ lần lượt là phân phối của bộ nháp và của mô hình đích tại vị trí đó (đã điều kiện hoá trên ngữ cảnh và các token nháp đứng trước). Token nháp $\tilde{x}\sim q$ được chấp nhận với xác suất
+\begin{equation}\label{eq:xs-chap-nhan}
+  a(\tilde{x}) = \min\!\left(1,\; \frac{p(\tilde{x})}{q(\tilde{x})}\right).
+\end{equation}
+Nếu $\tilde{x}$ bị bác bỏ, một token thay thế được lấy mẫu từ \textit{phân phối dư} (\textit{residual distribution})
+\begin{equation}\label{eq:phan-phoi-du}
+  p'(x) = \frac{\max\bigl(0,\; p(x)-q(x)\bigr)}{\sum_{y\in\mathcal{V}} \max\bigl(0,\; p(y)-q(y)\bigr)},
+\end{equation}
+mọi token nháp phía sau bị huỷ và vòng lặp kết thúc. Thuật toán~\ref{alg:sd} tóm tắt một vòng lặp đầy đủ.
+
+\begin{algorithm}[htbp]
+\caption{Một vòng lặp giải mã suy đoán với chuỗi nháp tuyến tính~\cite{leviathan2023speculative}}
+\label{alg:sd}
+\begin{algorithmic}[1]
+\Require Ngữ cảnh $x$, bộ nháp $M_q$, mô hình đích $M_p$, độ dài nháp $K$
+\Ensure Các token mới nối vào $x$
+\For{$i = 1$ \textbf{to} $K$} \Comment{sinh nháp tuần tự}
+  \State $q_i \gets M_q(x, \tilde{x}_{1:i-1})$; \quad $\tilde{x}_i \sim q_i$
+\EndFor
+\State $p_1,\dots,p_{K+1} \gets M_p(x, \tilde{x}_{1:K})$ \Comment{một lượt truyền xuôi}
+\For{$i = 1$ \textbf{to} $K$}
+  \State lấy $r \sim \mathcal{U}(0,1)$
+  \If{$r < \min\bigl(1, p_i(\tilde{x}_i)/q_i(\tilde{x}_i)\bigr)$}
+    \State nối $\tilde{x}_i$ vào $x$ \Comment{chấp nhận}
+  \Else
+    \State lấy $y \sim p'_i$ theo~\eqref{eq:phan-phoi-du}; nối $y$ vào $x$; \Return \Comment{bác bỏ, sửa}
+  \EndIf
+\EndFor
+\State lấy $y \sim p_{K+1}$; nối $y$ vào $x$ \Comment{token thưởng}
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Tính bảo toàn phân phối}
+\label{subsec:lossless}
+
+Tính chất quan trọng nhất của giải mã suy đoán là phân phối của token được chọn trùng khớp với phân phối của mô hình đích, bất kể bộ nháp tốt hay kém~\cite{leviathan2023speculative}. Một token $x$ được chọn qua hai trường hợp loại trừ nhau: bộ nháp đề xuất $x$ và được chấp nhận, hoặc token nháp bị bác bỏ và quá trình lấy mẫu lại cho ra $x$. Xác suất của trường hợp thứ nhất là
+\begin{equation}
+  q(x)\min\!\left(1,\frac{p(x)}{q(x)}\right) = \min\bigl(p(x), q(x)\bigr).
+\end{equation}
+Xác suất bác bỏ là $\beta_{\text{rej}} = 1-\sum_{y}\min\bigl(p(y),q(y)\bigr) = \sum_{y}\max\bigl(0, p(y)-q(y)\bigr)$, dùng đẳng thức $a-\min(a,b)=\max(0,a-b)$ và $\sum_y p(y)=1$. Nhân với~\eqref{eq:phan-phoi-du}, xác suất của trường hợp thứ hai bằng $\max\bigl(0, p(x)-q(x)\bigr)$. Cộng hai trường hợp:
+\begin{equation}\label{eq:bao-toan}
+  P(X=x) = \min\bigl(p(x),q(x)\bigr) + \max\bigl(0,\,p(x)-q(x)\bigr) = p(x).
+\end{equation}
+Do mỗi token được chọn theo đúng $p$, quy nạp theo vị trí cho thấy toàn bộ chuỗi đầu ra có cùng phân phối với giải mã tự hồi quy trên mô hình đích. Tính chất này được gọi là \textit{lossless}. Nó là hệ quả của tiêu chí chấp nhận chứ không phụ thuộc vào cách tạo nháp; do đó mọi cải tiến chỉ thay đổi \emph{cách chọn ứng viên nháp} hoặc \emph{số lượng ứng viên} đều giữ nguyên tính lossless, miễn là tiêu chí chấp nhận không bị sửa đổi.
+
+Trong trường hợp giải mã tham lam mà đồ án sử dụng (nhiệt độ bằng 0), $p$ là phân phối suy biến đặt toàn bộ xác suất vào $\arg\max$ của logit mô hình đích. Tiêu chí~\eqref{eq:xs-chap-nhan} khi đó trở thành: chấp nhận $\tilde{x}_i$ khi và chỉ khi nó trùng với token có logit lớn nhất của mô hình đích tại vị trí $i$; khi bác bỏ, token sửa chính là token đó. Về mặt toán học, đầu ra của giải mã suy đoán vì vậy trùng khớp từng token với giải mã tham lam thông thường. Cần lưu ý rằng khẳng định này giả định phép tính chính xác tuyệt đối. Trên GPU, lượt xác thực tính logit của $K+1$ vị trí trong một phép tính có hình dạng tensor khác với bước decode một token, nên thứ tự cộng dồn số thực dấu phẩy động có thể khác và sai số làm tròn có thể khác. Tại những vị trí mà hai token đứng đầu có logit gần như bằng nhau, sai khác rất nhỏ này đủ làm đổi kết quả $\arg\max$, và chuỗi đầu ra rẽ nhánh từ vị trí đó. Hiện tượng này không xuất phát từ tiêu chí chấp nhận mà từ số học dấu phẩy động; mức độ ảnh hưởng của nó trong hệ thống của đồ án được đo và phân tích ở Chương~\ref{chap:thu-nghiem}.
+
+\subsection{Phân tích tăng tốc và điều kiện hoà vốn}
+\label{subsec:phan-tich-tang-toc}
+
+Gọi $C_T$ là thời gian một bước decode của mô hình đích, $C_D$ là thời gian một bước của bộ nháp và $C_V(K)$ là thời gian lượt xác thực $K+1$ vị trí. Thời gian của một vòng lặp là
+\begin{equation}\label{eq:thoi-gian-vong}
+  T_{\text{vòng}}(K) = K\,C_D + C_V(K).
+\end{equation}
+Gọi $\tau(K)$ là số token thu được trong một vòng (gồm cả token sửa hoặc token thưởng). Nếu giả thiết mỗi token nháp được chấp nhận độc lập với cùng xác suất $\beta$ khi mọi token trước nó đã được chấp nhận, thì~\cite{leviathan2023speculative}
+\begin{equation}\label{eq:tau-ky-vong}
+  \mathbb{E}[\tau(K)] = \sum_{i=0}^{K}\beta^{i} = \frac{1-\beta^{K+1}}{1-\beta}.
+\end{equation}
+Hệ số tăng tốc so với giải mã tự hồi quy, tính theo thời gian trung bình cho mỗi token, là
+\begin{equation}\label{eq:speedup}
+  S(K) = \frac{C_T}{T_{\text{vòng}}(K)/\mathbb{E}[\tau(K)]} = \frac{\mathbb{E}[\tau(K)]\; C_T}{K\,C_D + C_V(K)}.
+\end{equation}
+Ở chế độ bị giới hạn bởi băng thông, $C_V(K) \approx C_T$ vì xử lý thêm $K$ vị trí gần như không tốn thêm thời gian (Mục~\ref{subsec:bang-thong}). Đặt tỉ lệ chi phí $c = C_T/C_D$, công thức~\eqref{eq:speedup} rút gọn thành
+\begin{equation}\label{eq:speedup-gon}
+  S(K) \approx \frac{\mathbb{E}[\tau(K)]}{1 + K/c}.
+\end{equation}
+Giải mã suy đoán chỉ có lợi khi $S(K) > 1$, tức $\mathbb{E}[\tau(K)] > 1 + K/c$. Với $K=1$, điều kiện này trở thành $\beta > 1/c = C_D/C_T$: xác suất chấp nhận phải lớn hơn tỉ lệ thời gian của bộ nháp so với mô hình đích. Giá trị $\beta$ nhỏ nhất thoả mãn đẳng thức được gọi là \textit{ngưỡng hoà vốn} $\beta^\ast(K)$; ngưỡng này tăng theo $K$, nghĩa là chuỗi nháp càng dài thì bộ nháp càng phải chính xác mới đáng chạy.
+
+Công thức~\eqref{eq:speedup} chỉ ra ba cơ chế có thể làm giải mã suy đoán chậm hơn giải mã thường, tức xảy ra \textit{tăng tốc âm} (\textit{negative speedup}). Thứ nhất, khi văn bản khó đoán, $\beta$ giảm và $\mathbb{E}[\tau]$ không bù được chi phí $K\,C_D$. Thứ hai, khi batch lớn, giả định $C_V(K)\approx C_T$ không còn đúng: mỗi lượt xác thực xử lý $B(K+1)$ token, bước tính chuyển sang chế độ bị giới hạn bởi tính toán và $C_V(K)$ tăng gần tuyến tính theo $K$. Thứ ba, khi mô hình đích được tăng tốc, chẳng hạn nhờ lượng tử hoá 4-bit, $C_T$ giảm trong khi $C_D$ của bộ nháp có thể giữ nguyên, nên $c$ giảm và ngưỡng hoà vốn tăng lên. Cả ba yếu tố đều phụ thuộc vào phần cứng, tải và nội dung yêu cầu, và thay đổi trong lúc hệ thống đang chạy. Đây là cơ sở lý thuyết cho việc chọn ngân sách nháp $K$ theo chi phí đo được thay vì cố định một giá trị lúc khởi động, là hướng tiếp cận của đồ án (Chương~\ref{chap:thiet-ke}).
+
+%=====================================================================
+\section{Các kiến trúc bộ nháp}
+\label{sec:kien-truc-nhap}
+
+Hiệu quả của giải mã suy đoán phụ thuộc vào hai đại lượng của bộ nháp: xác suất chấp nhận $\beta$ (bộ nháp có ``nghĩ giống'' mô hình đích hay không) và tỉ lệ chi phí $c$ (bộ nháp rẻ đến mức nào). Các nghiên cứu sau công trình gốc chủ yếu tìm cách cải thiện đồng thời hai đại lượng này~\cite{xia2024survey}.
+
+\subsection{Mô hình nháp độc lập}
+
+Cách đơn giản nhất là dùng một mô hình nhỏ hơn cùng họ với mô hình đích làm bộ nháp~\cite{leviathan2023speculative,chen2023speculative}, ví dụ Qwen2.5-0.5B-Instruct cho mô hình đích Qwen2.5-7B-Instruct~\cite{qwen2024qwen25}. Ưu điểm của cách này là không cần huấn luyện và dễ thay đổi. Nhược điểm là bộ nháp có KV cache riêng và tiêu tốn thêm VRAM; hai mô hình phải tương thích về tokenizer; và dù nhỏ hơn nhiều lần, mô hình nháp vẫn phải chạy trọn các tầng của nó ở mỗi bước nháp nên $c$ thường chỉ ở mức vài lần. Trong đồ án, cặp Qwen2.5-7B-Instruct-AWQ và Qwen2.5-0.5B-Instruct được dùng làm làn đối chứng \texttt{static} ở các mốc thực nghiệm đầu.
+
+\subsection{Nhiều đầu giải mã: Medusa}
+
+Medusa~\cite{cai2024medusa} bỏ mô hình nháp riêng và gắn thêm nhiều \textit{đầu giải mã} (\textit{decoding head}) lên tầng cuối của mô hình đích, đầu thứ $k$ dự đoán token ở vị trí $t+k$. Các ứng viên từ các đầu được tổ hợp thành một cây và xác thực trong một lượt. Vì các đầu dự đoán độc lập với nhau và không thấy token nháp đứng trước, độ chính xác giảm nhanh theo vị trí.
+
+\subsection{Nháp ở mức đặc trưng: họ EAGLE}
+
+EAGLE~\cite{li2024eagle} xuất phát từ quan sát rằng vector đặc trưng (\textit{feature}) ở tầng trên cùng của mô hình đích có tính quy luật cao hơn chuỗi token rời rạc. Bộ nháp của EAGLE là một tầng Transformer nhẹ, nhận đặc trưng của mô hình đích cùng embedding của token đã lấy mẫu để dự đoán đặc trưng ở bước kế tiếp, rồi dùng chính đầu ra ngôn ngữ (\textit{LM head}) của mô hình đích để ra phân phối token. Việc đưa token đã lấy mẫu vào đầu vào giúp bộ nháp giải quyết tính bất định của bước trước, và việc dùng chung LM head giúp phân phối nháp gần với mô hình đích. Vì bộ nháp chỉ có một tầng, $C_D$ nhỏ hơn rất nhiều so với một mô hình nháp độc lập; đổi lại, bộ nháp phải được huấn luyện riêng cho từng mô hình đích.
+
+EAGLE-3~\cite{li2025eagle3} bỏ ràng buộc dự đoán đặc trưng và cho bộ nháp dự đoán token trực tiếp, đồng thời kết hợp đặc trưng từ nhiều tầng của mô hình đích (tầng thấp, giữa và cao) thay vì chỉ tầng trên cùng. Quá trình huấn luyện mô phỏng việc sinh nháp nhiều bước ngay trong lúc huấn luyện (\textit{training-time test}), giúp bộ nháp quen với việc dùng chính đầu ra của nó làm đầu vào. Các tác giả báo cáo hệ số tăng tốc tới $6{,}5\times$ trên phần cứng của họ. Các engine phục vụ lớn như vLLM đã tích hợp EAGLE-3 làm một loại bộ nháp chuẩn; đây là kiến trúc bộ nháp chính trong sản phẩm của đồ án (Chương~\ref{chap:trien-khai}).
+
+\subsection{Phương pháp không cần huấn luyện}
+
+Một số phương pháp tạo nháp mà không cần huấn luyện thêm thành phần nào. Lookahead Decoding~\cite{fu2024lookahead} coi giải mã là bài toán giải hệ phi tuyến bằng phép lặp Jacobi, thu thập các $n$-gram xuất hiện trong quá trình lặp và dùng chúng làm ứng viên nháp. Các phương pháp tra cứu $n$-gram từ prompt hoặc từ văn bản đã sinh cũng được dùng phổ biến cho tác vụ có nhiều đoạn lặp lại. Ưu điểm chung là không phụ thuộc checkpoint huấn luyện; nhược điểm là độ chính xác nháp thường thấp hơn bộ nháp được huấn luyện, nhất là với văn bản tự do.
+
+\subsection{Cây nháp và xác thực theo cây}
+
+Với chuỗi nháp tuyến tính, nếu token nháp đầu tiên sai thì toàn bộ chuỗi phía sau bị huỷ. SpecInfer~\cite{miao2024specinfer} đề xuất xác thực nhiều ứng viên dưới dạng một \textit{cây token}: các nhánh chia sẻ tiền tố chung, và một \textit{mặt nạ chú ý cây} (\textit{tree attention mask}) cho phép mỗi token chỉ nhìn thấy tổ tiên của nó, nhờ đó cả cây được xác thực trong một lượt truyền xuôi. EAGLE và Medusa đều dùng cây nháp tĩnh với hình dạng chọn trước. EAGLE-2~\cite{li2024eagle2} thay cây tĩnh bằng \textit{cây nháp động}: giá trị của mỗi nút được ước lượng bằng tích các độ tự tin của bộ nháp dọc đường đi từ gốc, ở mỗi tầng chỉ mở rộng các nút có giá trị cao nhất, rồi chọn $m$ nút có giá trị cao nhất của toàn cây để xác thực. Nhờ giá trị giảm đơn điệu theo độ sâu, tập được chọn luôn là một cây liên thông. Hình~\ref{fig:cay-nhap} minh hoạ cây nháp và mặt nạ chú ý tương ứng.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  nd/.style={circle, draw, minimum size=7mm, inner sep=0pt},
+  sel/.style={nd, fill=blue!20},
+  drop/.style={nd, dashed, draw=gray, text=gray},
+  level distance=12mm, sibling distance=18mm,
+  edge from parent/.style={draw, -{Stealth}}
+]
+  \node[nd, fill=gray!15] (r) {gốc}
+    child {node[sel] (a) {$a$}
+      child {node[sel] (c) {$c$}
+        child {node[sel] (e) {$e$}}}
+      child {node[drop] {$d$}}}
+    child {node[sel] (b) {$b$}
+      child {node[sel] (f) {$f$}}}
+    child {node[drop] {$g$}};
+  \node[font=\footnotesize, align=left, anchor=north] at (0,-4.0)
+    {nút tô đậm: được chọn để xác thực\\nút nét đứt: giá trị thấp, bị loại};
+  % Mat na chu y
+  \begin{scope}[xshift=4.6cm, yshift=-0.4cm]
+    \def\names{{"a","b","c","e","f"}}
+    \foreach \i in {0,...,4} {
+      \pgfmathsetmacro{\lab}{\names[\i]}
+      \node[font=\footnotesize] at (\i*0.55+0.275, 0.35) {$\lab$};
+      \node[font=\footnotesize] at (-0.4, -\i*0.55-0.275) {$\lab$};
+    }
+    % hang: a b c e f ; cot: a b c e f ; o duoc phep = to tien hoac chinh no
+    \foreach \rr/\cols in {0/{0}, 1/{1}, 2/{0,2}, 3/{0,2,3}, 4/{1,4}} {
+      \foreach \cc in \cols { \fill[blue!40] (\cc*0.55,-\rr*0.55) rectangle ++(0.55,-0.55); }
+      \foreach \cc in {0,...,4} { \draw[gray!60] (\cc*0.55,-\rr*0.55) rectangle ++(0.55,-0.55); }
+    }
+    \node[font=\footnotesize, align=center] at (1.375,-3.2) {mặt nạ chú ý cây\\(ô tô màu: được phép chú ý)};
+  \end{scope}
+\end{tikzpicture}
+\caption{Cây nháp và mặt nạ chú ý cây tương ứng (sơ đồ minh hoạ theo nguyên lý của SpecInfer và EAGLE-2~\cite{miao2024specinfer,li2024eagle2})}
+\label{fig:cay-nhap}
+\end{figure}
+
+Bảng~\ref{tab:so-sanh-nhap} so sánh các kiến trúc bộ nháp đã trình bày theo các tiêu chí liên quan đến bài toán của đồ án.
+
+\begin{table}[htbp]
+\centering
+\caption{So sánh các kiến trúc bộ nháp}
+\label{tab:so-sanh-nhap}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{27mm}>{\raggedright\arraybackslash}p{21mm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Phương pháp} & \textbf{Cần huấn luyện} & \textbf{Ưu điểm} & \textbf{Hạn chế} \\
+\midrule
+Mô hình nháp độc lập~\cite{leviathan2023speculative,chen2023speculative} & Không (dùng mô hình có sẵn) & Đơn giản, dễ thay đổi, không phụ thuộc mô hình đích & Tốn VRAM và KV cache riêng; $c$ thấp; cần tokenizer tương thích \\
+Medusa~\cite{cai2024medusa} & Có (các đầu giải mã) & Không cần mô hình riêng; xác thực theo cây & Các đầu dự đoán độc lập, độ chính xác giảm nhanh theo vị trí \\
+EAGLE, EAGLE-2~\cite{li2024eagle,li2024eagle2} & Có (một tầng nháp) & Nháp ở mức đặc trưng, $C_D$ rất nhỏ; EAGLE-2 có cây động & Phải huấn luyện cho từng mô hình đích; cây cần mặt nạ chú ý riêng \\
+EAGLE-3~\cite{li2025eagle3} & Có (training-time test) & Kết hợp đặc trưng nhiều tầng; được các engine lớn hỗ trợ & Chi phí huấn luyện lớn hơn; phụ thuộc checkpoint \\
+Lookahead, $n$-gram~\cite{fu2024lookahead} & Không & Không cần checkpoint & Độ chính xác nháp thấp với văn bản tự do \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+%=====================================================================
+\section{Điều chỉnh động ngân sách nháp}
+\label{sec:dieu-chinh-dong}
+
+Ngay cả với bộ nháp tốt, số token nháp tối ưu ở mỗi bước vẫn phụ thuộc vào ngữ cảnh, vào tải của hệ thống và vào phần cứng, như phân tích ở Mục~\ref{subsec:phan-tich-tang-toc}. Các nghiên cứu gần đây tiếp cận vấn đề này theo nhiều trục khác nhau.
+
+\textbf{Theo độ tự tin của bộ nháp.} EAGLE-2~\cite{li2024eagle2} dùng độ tự tin của bộ nháp làm xấp xỉ xác suất chấp nhận để định hình cây: ngữ cảnh dễ cho cây sâu và hẹp, ngữ cảnh khó cho cây nông và rộng. Tuy vậy, tổng số nút đưa đi xác thực và độ sâu tối đa vẫn là siêu tham số cố định. TALON~\cite{liu2026talon} giữ cố định \emph{ngân sách} số nút và để cây tự phát triển theo độ tự tin cho đến khi hết ngân sách, thay vì cố định độ rộng và độ sâu; các tác giả báo cáo hệ số tăng tốc tới $5{,}16\times$ khi gắn lên EAGLE-3. Cả hai phương pháp đều được đánh giá chủ yếu ở chế độ một yêu cầu và không dùng thông tin chi phí của phần cứng.
+
+\textbf{Theo lịch chạy.} PEARL~\cite{liu2025pearl} nhận thấy bộ nháp và mô hình đích chờ nhau trong giải mã suy đoán thông thường, và đề xuất chồng lấn hai pha bằng cách xác thực trước token đầu tiên và tiếp tục sinh nháp trong lúc xác thực. Độ dài nháp vì vậy tự điều chỉnh theo việc chấp nhận. Các tác giả báo cáo tăng tốc tới $4{,}43\times$ so với giải mã tự hồi quy và $1{,}50\times$ so với giải mã suy đoán thông thường; phương pháp cần chạy bộ nháp và mô hình đích song song trên tài nguyên tính toán riêng.
+
+\textbf{Theo chi phí phần cứng ở tải cao.} D-cut~\cite{liu2026dcut} chỉ ra rằng ở mức đồng thời cao, việc xác thực các chuỗi nháp dài lãng phí tính toán cho các token bị bác bỏ và có thể khiến giải mã suy đoán chậm hơn giải mã tự hồi quy. Phương pháp cắt tỉa độ sâu xác thực trên toàn batch theo độ tự tin của bộ nháp, và đo chi phí thực thi lúc khởi động để chọn mức cắt phù hợp với GPU và cấu hình song song. Đây là công trình gần nhất với hướng tiếp cận của đồ án vì đưa chi phí đo được của phần cứng vào quyết định; tuy nhiên D-cut nhắm tới GPU trung tâm dữ liệu (H20, H800) ở mức đồng thời lớn, trong khi đồ án nhắm tới GPU phổ thông ở batch nhỏ và vừa.
+
+\textbf{Trong các engine phục vụ.} Ở phiên bản vLLM 0.30.0 mà đồ án sử dụng, khung giải mã suy đoán thực thi chuỗi nháp tuyến tính với số token nháp $K$ là một đại lượng vô hướng; cấu hình cho phép khai báo $K$ theo các khoảng kích thước batch, nhưng không có giao diện để truyền một cấu trúc cây tuỳ ý vào lượt xác thực~\cite{vllm-repo}. Ràng buộc này quyết định phạm vi thiết kế của đồ án và được phân tích ở Chương~\ref{chap:thiet-ke}.
+
+Bảng~\ref{tab:so-sanh-thich-ung} tổng hợp vị trí của các phương pháp trên và của đồ án.
+
+\begin{table}[htbp]
+\centering
+\caption{So sánh các phương pháp điều chỉnh ngân sách nháp}
+\label{tab:so-sanh-thich-ung}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{22mm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{26mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Phương pháp} & \textbf{Tín hiệu điều khiển} & \textbf{Dùng chi phí đo trên GPU} & \textbf{Chế độ đánh giá chính} \\
+\midrule
+EAGLE-2~\cite{li2024eagle2} & Độ tự tin của bộ nháp & Không & Một yêu cầu, GPU cao cấp \\
+TALON~\cite{liu2026talon} & Độ tự tin, ngân sách số nút & Không & Một yêu cầu, GPU cao cấp \\
+PEARL~\cite{liu2025pearl} & Kết quả chấp nhận trong lúc chạy song song & Không & Bộ nháp và mô hình đích trên tài nguyên riêng \\
+D-cut~\cite{liu2026dcut} & Độ tự tin trên toàn batch & Có, đo lúc khởi động & Đồng thời cao, GPU trung tâm dữ liệu \\
+Đồ án (FlexSDS) & Tỉ lệ chấp nhận trượt, kích thước batch, áp lực bộ nhớ & Có, hồ sơ chi phí đo theo $(K, B)$ & GPU phổ thông, batch 1--32 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+%=====================================================================
+\section{Các hướng tăng tốc khác đã được cân nhắc}
+\label{sec:huong-khac}
+
+Ngoài giải mã suy đoán, nhóm đã cân nhắc hai hướng tăng tốc suy luận khác ở giai đoạn chọn đề tài. Hướng thứ nhất là \textit{nén KV cache}: các phương pháp như H$_2$O~\cite{zhang2023h2o} giữ lại các token có tổng điểm chú ý lớn, còn StreamingLLM~\cite{xiao2024streamingllm} giữ các token ``neo chú ý'' ở đầu chuỗi cùng một cửa sổ trượt. Hướng này giảm bộ nhớ và chi phí attention với ngữ cảnh dài. Hướng thứ hai là \textit{nén prompt}, tiêu biểu là LLMLingua~\cite{jiang2023llmlingua}, dùng một mô hình nhỏ loại bỏ các token ít thông tin khỏi prompt để giảm chi phí prefill. Cả hai hướng đều làm thay đổi thông tin mô hình nhìn thấy, nên đầu ra có thể khác so với mô hình gốc và cần đánh giá chất lượng riêng. Ngược lại, giải mã suy đoán giữ nguyên phân phối đầu ra (Mục~\ref{subsec:lossless}) và tác động trực tiếp lên pha decode, vốn chiếm phần lớn thời gian của các tác vụ có đầu ra dài trong pipeline của đồ án. Vì vậy, nhóm chọn giải mã suy đoán làm hướng chính.
+
+%=====================================================================
+\section{Các chỉ số đánh giá}
+\label{sec:chi-so}
+
+Các chỉ số dưới đây được dùng thống nhất trong toàn bộ quyển; định nghĩa trùng với cách tính trong công cụ tổng hợp kết quả của đồ án (Chương~\ref{chap:thu-nghiem}).
+
+\textbf{Chỉ số độ trễ.} \textit{TTFT} (\textit{Time To First Token}) là thời gian từ lúc gửi yêu cầu đến lúc nhận token đầu tiên, phản ánh thời gian chờ lập lịch và pha prefill. \textit{TPOT} (\textit{Time Per Output Token}) là thời gian trung bình sinh mỗi token sau token đầu tiên:
+\begin{equation}\label{eq:tpot}
+  \mathrm{TPOT} = \frac{T_{\text{E2E}} - \mathrm{TTFT}}{n_{\text{out}} - 1},
+\end{equation}
+trong đó $T_{\text{E2E}}$ là độ trễ đầu--cuối của yêu cầu và $n_{\text{out}}$ là số token đầu ra. TPOT phản ánh trực tiếp tốc độ của pha decode, nơi giải mã suy đoán tác động, và là chỉ số tối ưu chính của đồ án. \textit{ITL} (\textit{Inter-Token Latency}) là khoảng cách giữa hai lần nhận token liên tiếp; với giải mã suy đoán, nhiều token có thể đến cùng lúc nên ITL có phân phối không đều, và khoảng cách giữa các gói dữ liệu truyền dòng (SSE) phía client không được diễn giải trực tiếp thành TPOT của engine.
+
+\textbf{Thông lượng.} Thông lượng hệ thống là tổng số token đầu ra của mọi yêu cầu chia cho thời gian của lượt đo, tính bằng token/giây. Chỉ số này cho biết khả năng phục vụ của máy chủ ở một mức tải và là trục mà giải mã suy đoán thường bất lợi khi tải cao.
+
+\textbf{Chỉ số của giải mã suy đoán.} Tỉ lệ chấp nhận $\alpha$ và độ dài chấp nhận trung bình $\tau$ được tính từ các bộ đếm của engine trên toàn bộ một lượt đo:
+\begin{equation}\label{eq:alpha-tau}
+  \alpha = \frac{\sum \text{số token nháp được chấp nhận}}{\sum \text{số token nháp được đề xuất}}, \qquad
+  \tau = 1 + \frac{\sum \text{số token nháp được chấp nhận}}{\sum \text{số lượt xác thực}}.
+\end{equation}
+Cần phân biệt $\alpha$ đo theo~\eqref{eq:alpha-tau} với xác suất chấp nhận từng vị trí $\beta$ trong mô hình lý thuyết~\eqref{eq:tau-ky-vong}. Vì mọi token đứng sau token bị bác bỏ đầu tiên đều bị tính là ``không được chấp nhận'', $\alpha$ là tỉ lệ trung bình trên cả chuỗi nháp và thường nhỏ hơn $\beta$ khi $K>1$. Do đó, việc thay trực tiếp $\alpha$ vào~\eqref{eq:tau-ky-vong} sẽ cho giá trị $\tau$ thấp hơn thực tế; điểm này được phân tích lại khi đánh giá bộ điều khiển ở Chương~\ref{chap:thu-nghiem}.
+
+\textbf{Hệ số tăng tốc.} Hệ số tăng tốc của một làn phục vụ được tính theo TPOT, so với làn giải mã thường (\texttt{vanilla}) trên cùng phần cứng, cùng workload và cùng mức đồng thời:
+\begin{equation}\label{eq:speedup-do}
+  \text{Speedup} = \frac{\mathrm{TPOT}^{\text{vanilla}}_{p50}}{\mathrm{TPOT}^{\text{làn}}_{p50}},
+\end{equation}
+với $p50$ là trung vị qua các lần lặp. Giá trị nhỏ hơn 1 nghĩa là tăng tốc âm.
+
+\textbf{Tài nguyên và chất lượng.} Đỉnh VRAM được lấy mẫu trong suốt lượt đo để đánh giá rủi ro tràn bộ nhớ. Về chất lượng, vì giải mã suy đoán lossless về lý thuyết, đồ án không đánh giá chất lượng sinh theo nghĩa thông thường, mà kiểm tra hai điều: đầu ra của làn suy đoán có khớp từng token với làn giải mã thường hay không, và các trường thông tin nghiệp vụ trích xuất được có đúng so với nhãn của bộ dữ liệu hay không.
+
+%=====================================================================
+\section{Khoảng trống nghiên cứu và định hướng của đồ án}
+\label{sec:khoang-trong}
+
+Từ tổng quan trên có thể rút ra ba nhận xét. Thứ nhất, tính lossless của giải mã suy đoán chỉ phụ thuộc vào tiêu chí chấp nhận, nên mọi cải tiến về cách sinh nháp và về số lượng nháp đều có thể áp dụng mà không ảnh hưởng chất lượng về mặt lý thuyết. Thứ hai, hướng ``định hình cây nháp theo độ tự tin'' đã được EAGLE-2 và TALON khai thác kỹ, nhưng các phương pháp này được đánh giá chủ yếu ở chế độ một yêu cầu trên GPU cao cấp và không dùng thông tin chi phí của phần cứng. Thứ ba, phân tích ở Mục~\ref{subsec:phan-tich-tang-toc} và kết quả của D-cut cho thấy lợi ích của giải mã suy đoán phụ thuộc mạnh vào tỉ lệ chi phí giữa bộ nháp và mô hình đích trên đúng GPU đang chạy, vào kích thước batch và vào loại nội dung sinh; cấu hình nháp cố định có thể gây tăng tốc âm. D-cut giải quyết vấn đề này cho GPU trung tâm dữ liệu ở mức đồng thời cao, còn chế độ GPU phổ thông với mô hình lượng tử hoá 4-bit và batch nhỏ đến vừa, vốn là chế độ của các hệ thống tự triển khai quy mô nhỏ, chưa được khảo sát tương xứng.
+
+Đồ án hướng tới khoảng trống này với ba định hướng. Một là xây dựng bộ điều khiển chọn ngân sách nháp $K$ ở từng bước dựa trên hồ sơ chi phí đo trên chính GPU đang phục vụ, tỉ lệ chấp nhận quan sát được và áp lực bộ nhớ, có khả năng tắt suy đoán ($K=0$) khi không có lợi, và giữ nguyên tiêu chí chấp nhận của engine. Hai là tích hợp bộ điều khiển vào vLLM dưới dạng một hệ thống phục vụ hoàn chỉnh có giao diện tương thích OpenAI. Ba là đánh giá trên một quy trình xử lý hoá đơn tiếng Việt gồm ba tác vụ có mức entropy khác nhau, quét theo thang mức đồng thời, thay vì chỉ một con số tăng tốc đo ở batch 1.
+
+\section{Kết chương}
+
+Chương này đã trình bày cơ chế sinh văn bản tự hồi quy, giải thích vì sao pha decode bị giới hạn bởi băng thông bộ nhớ ở batch nhỏ, và trình bày thuật toán giải mã suy đoán cùng chứng minh tính bảo toàn phân phối. Mô hình chi phí~\eqref{eq:speedup} cho thấy lợi ích của giải mã suy đoán phụ thuộc vào xác suất chấp nhận, vào tỉ lệ chi phí $C_T/C_D$ và vào chi phí xác thực theo kích thước batch, đồng thời chỉ ra ba cơ chế gây tăng tốc âm. Tổng quan các kiến trúc bộ nháp và các phương pháp điều chỉnh ngân sách nháp cho thấy khoảng trống ở chế độ GPU phổ thông với batch nhỏ đến vừa, nơi đồ án đặt bài toán. Chương~\ref{chap:thiet-ke} trình bày phân tích yêu cầu và thiết kế hệ thống FlexSDS dựa trên các cơ sở này.

@@ -1,0 +1,232 @@
+\chapter{Thực nghiệm và đánh giá}
+\label{chap:thu-nghiem}
+
+Chương này trình bày các thực nghiệm đánh giá hệ thống. Mục~\ref{sec:muc-tieu-tn} nêu mục tiêu. Mục~\ref{sec:thiet-lap} và Mục~\ref{sec:workload} mô tả thiết lập, các chiến dịch đo và các workload. Mục~\ref{sec:ket-qua} trình bày kết quả theo trình tự phát triển của hệ thống: chuẩn đối chứng, chi phí thành phần, bộ điều khiển phiên bản đầu, bộ điều khiển theo chi phí trên EAGLE, tính lossless và chất lượng nghiệp vụ. Mục~\ref{sec:thao-luan} thảo luận kết quả theo ba câu hỏi nghiên cứu, và Mục~\ref{sec:de-doa} phân tích các yếu tố đe doạ tính hợp lệ.
+
+Mọi con số trong chương được lấy trực tiếp từ các tệp kết quả của dự án; nguồn được ghi dưới mỗi bảng. Các bảng hệ số tăng tốc được sinh tự động từ tệp kết quả bằng một script để tránh sai sót khi chép tay.
+
+%=====================================================================
+\section{Mục tiêu thực nghiệm}
+\label{sec:muc-tieu-tn}
+
+Các thực nghiệm nhằm trả lời ba câu hỏi nghiên cứu và kiểm tra hai tính chất của hệ thống. Thứ nhất, xác lập chuẩn đối chứng: giải mã suy đoán với ngân sách cố định mang lại tăng tốc bao nhiêu trên từng loại workload và từng mức tải, và tăng tốc âm có xuất hiện hay không. Thứ hai, đo chi phí thành phần của mô hình đích và bộ nháp trên GPU để làm đầu vào cho bộ điều khiển. Thứ ba, đánh giá bộ điều khiển thích ứng so với cấu hình cố định (RQ1) và khả năng tránh tăng tốc âm (RQ2). Thứ tư, kiểm tra tính lossless bằng so khớp đầu ra từng token. Thứ năm, đánh giá chất lượng nghiệp vụ của quy trình hoá đơn khi bật giải mã suy đoán, và xác định loại tác vụ được hưởng lợi (RQ3).
+
+%=====================================================================
+\section{Thiết lập thực nghiệm}
+\label{sec:thiet-lap}
+
+Mọi chiến dịch dùng cùng mô hình đích Qwen2.5-7B-Instruct lượng tử hoá AWQ 4-bit (revision \texttt{b250375}), vLLM 0.30.0, giải mã tham lam (nhiệt độ 0, hạt giống 42), tối đa 32 chuỗi đồng thời và độ dài ngữ cảnh tối đa 4\,096 token. Do khả năng cấp phát GPU của các nền tảng thay đổi trong quá trình làm đồ án, các chiến dịch được chạy trên ba loại GPU khác nhau. Bảng~\ref{tab:chien-dich} tổng hợp các chiến dịch. Số liệu của các GPU khác nhau không được so trực tiếp với nhau; mọi hệ số tăng tốc đều so với làn \texttt{vanilla} chạy trên cùng GPU, cùng workload và cùng mức đồng thời.
+
+\begin{table}[htbp]
+\centering
+\caption{Các chiến dịch thực nghiệm}
+\label{tab:chien-dich}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{17mm}>{\raggedright\arraybackslash}p{17mm}>{\raggedright\arraybackslash}p{19mm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{30mm}@{}}
+\toprule
+\textbf{Chiến dịch} & \textbf{Thời điểm} & \textbf{GPU} & \textbf{Làn / nội dung} & \textbf{Quy mô} \\
+\midrule
+M1 & 10/2026 & T4 & \texttt{vanilla}, \texttt{static} & 36 ô, 5 lần lặp \\
+M2-03 & 18/10/2026 & T4 & Lossless: \texttt{vanilla} và \texttt{adaptive} v0 & 54 prompt \\
+M2-04 & 24/10/2026 & T4 & \texttt{vanilla}, \texttt{static}, \texttt{adaptive} v0 & 54 ô, 5 lần lặp \\
+M3-02 & 25/10/2026 & L4 (Modal) & Chi phí một bước của mô hình đích và nháp 0,5B & 60 ô \\
+M3-05 & 04/11/2026 & L4 (Colab) & \texttt{vanilla}, \texttt{static}, \texttt{adaptive} v0, \texttt{eagle} & 72 ô, 5 lần lặp \\
+M3-06, M4-03 & 11/2026 & A10G (Modal) & Quy trình 3 nút; chất lượng Nút 1 trên 4 làn & 30 hoá đơn \\
+R6 & 23/11/2026 & A10G (Modal) & \texttt{vanilla}, EAGLE $K=3$, EAGLE + R6 (hợp đồng tương đồng); lossless & 54 ô, 5 lần lặp; 54 prompt \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Ở các chiến dịch đo tốc độ, mỗi ô (làn, workload, mức đồng thời $c$) gồm 5 lần lặp, mỗi lần 32 yêu cầu, với $c \in \{1, 2, 4, 8, 16, 32\}$. Mọi ô của M1 (36/36), M2-04 (54/54) và M3-05 (72/72) đều có độ biến thiên TPOT dưới ngưỡng 15\%. Chiến dịch R6 được thực hiện sau ngày đóng băng mã nguồn (15/11/2026), trên mã nguồn của nhánh \texttt{develop} tại commit \texttt{229b3e4}; kết quả của chiến dịch này được trình bày như kết quả đo của sản phẩm hiện hành và đang chờ nhóm xác nhận đưa vào bộ số liệu chính thức \CanBoSung{xác nhận của nhóm về việc dùng số liệu R6 ngày 23/11 làm số chính thức, và đưa tệp kết quả vào \path{experiments/results/} của kho mã}.
+
+%=====================================================================
+\section{Workload và dữ liệu}
+\label{sec:workload}
+
+Bảng~\ref{tab:workload} mô tả các workload. W1, W2 và W3 tương ứng với ba nút của quy trình hoá đơn và có mức entropy đầu ra tăng dần. Do số yêu cầu mỗi lượt đo (32) lớn hơn số mẫu, các mẫu được dùng lại theo vòng. W4 là quy trình ba nút chạy nối tiếp, dùng để kiểm tra chức năng và chất lượng.
+
+\begin{table}[htbp]
+\centering
+\caption{Các workload dùng trong thực nghiệm}
+\label{tab:workload}
+\small
+\begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{14mm}>{\raggedright\arraybackslash}p{25mm}>{\raggedright\arraybackslash}p{18mm}@{}}
+\toprule
+\textbf{W} & \textbf{Tác vụ} & \textbf{Số mẫu} & \textbf{Giới hạn đầu ra} & \textbf{Entropy} \\
+\midrule
+W1 & Trích xuất hoá đơn MC-OCR thành JSON (chế độ JSON) & 30 & 1\,024 token & Thấp \\
+W2 & Câu hỏi tiếng Việt sang SQL trên các view hoá đơn & 12 & 96 token & Trung bình \\
+W3 & Phân tích nghiệp vụ dạng văn xuôi & 12 & 192 (v1, M1); 768 (v2) & Cao \\
+W4 & Nút 1 $\rightarrow$ Nút 2 (6 câu hỏi) $\rightarrow$ Nút 3 (1 báo cáo) & 30 hoá đơn & theo từng nút & Hỗn hợp \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+%=====================================================================
+\section{Kết quả}
+\label{sec:ket-qua}
+
+\subsection{Chuẩn đối chứng với ngân sách cố định}
+\label{subsec:kq-m1}
+
+Bảng~\ref{tab:m1} trình bày hệ số tăng tốc của làn \texttt{static} (mô hình nháp Qwen2.5-0.5B, $K=3$) so với \texttt{vanilla} trên T4 trong chiến dịch M1.
+
+\input{chapters/gen-m1}
+
+Kết quả cho thấy lợi ích của giải mã suy đoán phụ thuộc mạnh vào loại nội dung. Với W1 (JSON, $\bar\alpha \approx 0{,}92$) và W2 (SQL, $\bar\alpha \approx 0{,}80$), làn \texttt{static} tăng tốc $1{,}29$--$1{,}34\times$ ở $c \le 4$, nhưng lợi ích giảm dần khi tải tăng: $1{,}16\times$ với W1 và $1{,}04\times$ với W2 ở $c=32$. Với W3 (văn xuôi tự do, $\bar\alpha \approx 0{,}55$), giải mã suy đoán không mang lại lợi ích ở tải thấp ($0{,}98$--$1{,}00\times$) và trở nên chậm hơn rõ rệt khi tải tăng, xuống $0{,}81\times$ ở $c = 32$. Đây là bằng chứng thực nghiệm đầu tiên của đồ án về hiện tượng tăng tốc âm, phù hợp với cơ chế phân tích ở Mục~\ref{subsec:phan-tich-tang-toc}: khi tỉ lệ chấp nhận thấp và batch lớn, chi phí sinh và xác thực nháp không được bù lại. Ngoài ra, TTFT của làn \texttt{static} cao hơn \texttt{vanilla} khoảng 2--3 lần ở mọi ô do phải chạy prefill cho cả hai mô hình; với các tác vụ có đầu ra dài, phần này được bù bởi TPOT thấp hơn. Đỉnh VRAM của cả 36 ô nằm trong khoảng $12\,203$--$13\,311$~MB trên GPU 16~GB và không có lỗi tràn bộ nhớ.
+
+\subsection{Chi phí thành phần trên L4}
+\label{subsec:kq-m302}
+
+Để thay các hằng số ước lượng trong mô hình chi phí bằng số đo thật, nhóm đo thời gian một bước decode của mô hình đích $C_T(L, B)$ và của mô hình nháp 0,5B $C_D(L, B)$ trên L4 với độ dài ngữ cảnh $L$ và kích thước batch $B$. Thời gian một bước được tính bằng $(T(1+N) - T(1))/N$ với $N = 64$, trong đó $T(m)$ là thời gian sinh $m$ token cho cả batch, nhờ đó loại bỏ phần prefill. Mỗi ô gồm 3 lượt khởi động và 5 lượt đo; cả 60 ô có độ biến thiên dưới 15\%. Bảng~\ref{tab:m302} trích một phần kết quả.
+
+\begin{table}[htbp]
+\centering
+\caption{Thời gian một bước decode trên L4 (ms, trung vị 5 lượt)}
+\label{tab:m302}
+\small
+\begin{tabular}{@{}llrrrrrr@{}}
+\toprule
+\textbf{Mô hình} & \textbf{$L$} & \textbf{$B=1$} & \textbf{$B=2$} & \textbf{$B=4$} & \textbf{$B=8$} & \textbf{$B=16$} & \textbf{$B=32$} \\
+\midrule
+Đích 7B AWQ ($C_T$) & 256  & 19,15 & 19,09 & 19,49 & 19,80 & 20,64 & 23,44 \\
+                    & 1024 & 19,06 & 19,61 & 20,08 & 20,81 & 23,27 & 30,04 \\
+                    & 3072 & 19,35 & 20,39 & 21,81 & 25,72 & 32,16 & 52,96 \\
+\midrule
+Nháp 0,5B ($C_D$)   & 256  & 4,79 & 5,27 & 4,90 & 5,08 & 5,34 & 5,72 \\
+                    & 1024 & 4,89 & 5,21 & 5,27 & 5,31 & 6,27 & 6,70 \\
+                    & 3072 & 5,19 & 5,23 & 5,76 & 6,14 & 8,08 & 11,40 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+{\footnotesize Nguồn: \path{experiments/results/m3_02_forward_costs_l4.json} (lưới đầy đủ $L \in \{256, 512, 1024, 2048, 3072\}$).}
+\end{table}
+
+Hai quan sát đáng chú ý. Thứ nhất, ở batch nhỏ, thời gian một bước của mô hình đích gần như không đổi theo độ dài ngữ cảnh (khoảng 19~ms), sát với cận dưới do băng thông đã ước lượng ở Mục~\ref{subsec:bang-thong}; chi phí attention trên KV cache chỉ nổi lên khi cả $L$ và $B$ đều lớn ($52{,}96$~ms ở $L = 3072$, $B = 32$). Thứ hai, một bước của mô hình nháp 0,5B tốn khoảng 25\% một bước của mô hình đích ở $B = 1$, tức tỉ lệ chi phí $c = C_T / C_D \approx 4$. Với $K = 3$, theo~\eqref{eq:speedup-gon} ba bước nháp đã tiêu tốn khoảng 75\% thời gian của một bước đích, nên giải mã suy đoán chỉ có lợi khi tỉ lệ chấp nhận đủ cao. Điều này giải thích vì sao W3 với $\bar\alpha \approx 0{,}55$ không có lợi ngay cả ở tải thấp.
+
+\subsection{Bộ điều khiển phiên bản đầu với quy tắc ngưỡng}
+\label{subsec:kq-v0}
+
+Phiên bản đầu của bộ điều khiển (Adaptive v0) dùng quy tắc ngưỡng theo $\hat\alpha$ (lớp 3, Mục~\ref{sec:bo-dieu-khien}) và mô hình nháp 0,5B. Bảng~\ref{tab:m2} trình bày kết quả chiến dịch M2-04 trên T4, và Bảng~\ref{tab:m3} trình bày kết quả chiến dịch M3-05 trên L4, trong đó có thêm làn \texttt{eagle} dùng đầu nháp EAGLE-3.1 với $K = 3$ cố định. Hình~\ref{fig:m3} biểu diễn kết quả M3-05 theo mức đồng thời.
+
+\input{chapters/gen-m2}
+
+\input{chapters/gen-m3}
+
+\input{chapters/gen-m3-plot}
+
+Kết quả của Adaptive v0 là âm tính rõ ràng. Trên cả hai GPU, bộ điều khiển chỉ ngang hoặc nhỉnh hơn \texttt{static} ở W1 với $c=1$ ($1{,}31$ so với $1{,}28$ trên T4; $1{,}45$ so với $1{,}43$ trên L4) và kém hơn ở hầu hết các ô còn lại. Với W3, mục tiêu chính của cơ chế ``tắt suy đoán khi không có lợi'', Adaptive v0 chậm hơn cả \texttt{vanilla} ở mọi mức tải: $0{,}58$--$0{,}75\times$ trên T4 và $0{,}47$--$0{,}75\times$ trên L4, tệ hơn cả làn \texttt{static}. Cổng nghiệm thu của nhóm cho W3 (tăng tốc $\ge 1$ ở mọi mức đồng thời) vì vậy không đạt. Với W2, Adaptive v0 tụt dưới 1 từ $c = 4$.
+
+Phân tích cho thấy ba nguyên nhân. Thứ nhất, lựa chọn $k = 0$ không tương đương với giải mã thường: trong vLLM, khi bộ nháp được cấu hình, mô hình nháp vẫn chạy một lượt truyền xuôi ở mỗi bước để giữ KV cache của nó đồng bộ, nên một bước ``tắt suy đoán'' vẫn tốn khoảng $C_T + C_D$ theo Bảng~\ref{tab:m302}, cộng với chi phí của bộ lập lịch tuỳ biến. Thứ hai, quy tắc ngưỡng không dùng thông tin kích thước batch, nên ở tải cao nó vẫn chọn $k = 3$ hoặc $k = 4$ cho W1 và W2 trong khi chi phí xác thực đã tăng mạnh. Thứ ba, với W3, $\hat\alpha$ dao động quanh ngưỡng $0{,}65$ ($\bar\alpha \approx 0{,}62$), khiến bộ điều khiển chuyển qua lại giữa $k = 0$ và $k = 2$ cùng các bước thăm dò. Những quan sát này là động lực để thiết kế lớp 2 dựa trên hồ sơ chi phí đo theo $(k, B)$.
+
+Làn \texttt{eagle} cho thấy một bức tranh khác. Dù $\alpha$ đo được thấp ($0{,}26$--$0{,}40$), đầu nháp EAGLE-3.1 rất rẻ nên làn này tăng tốc $1{,}17$--$1{,}25\times$ trên W2 và W3 ở $c \le 4$, vượt xa mô hình nháp 0,5B trên W3. Tuy nhiên, giống mọi cấu hình cố định khác, lợi ích của nó giảm nhanh theo tải và xuống dưới 1 từ $c = 16$ ở cả ba workload ($0{,}65$--$0{,}69\times$ ở $c = 32$). Về giá trị $\alpha$ thấp của làn EAGLE, cần lưu ý rằng $\alpha$ được tính là tỉ lệ token nháp được chấp nhận trên toàn chuỗi nháp (Mục~\ref{sec:chi-so}); với $K=3$, mọi token sau token bị bác bỏ đầu tiên đều bị tính là không được chấp nhận, nên $\alpha$ nhỏ hơn đáng kể so với xác suất chấp nhận ở từng vị trí.
+
+\subsection{Bộ điều khiển theo chi phí trên EAGLE}
+\label{subsec:kq-r6}
+
+Chiến dịch R6 đánh giá chế độ thích ứng hiện hành của sản phẩm: đầu nháp EAGLE-3.1 kết hợp bộ điều khiển theo chi phí (lớp 2) với hồ sơ A10G ở Bảng~\ref{tab:ho-so-a10g}. Ba nhánh được chạy theo hợp đồng thực thi tương đồng (cùng chế độ eager, lập lịch bất đồng bộ và cấu hình máy chủ): \texttt{vanilla}, EAGLE với $K = 3$ cố định, và EAGLE + R6 với trần $K = 4$. Bảng~\ref{tab:r6} và Hình~\ref{fig:r6} trình bày kết quả.
+
+\input{chapters/gen-r6}
+
+\input{chapters/gen-r6-plot}
+
+Kết quả cho thấy bộ điều khiển theo chi phí \emph{chưa} đạt mục tiêu. EAGLE + R6 chậm hơn EAGLE $K=3$ cố định ở mọi ô của cả ba workload. So với \texttt{vanilla}, R6 chỉ có lợi nhẹ ở W1 khi $c \le 2$ ($1{,}08$--$1{,}09\times$) và ở W3 khi $c = 1$ ($1{,}02\times$); ở các ô còn lại, đặc biệt khi $c \ge 16$, nó chậm hơn \texttt{vanilla} ($0{,}49$--$0{,}59\times$). Trong khi đó, EAGLE $K=3$ cố định đạt $1{,}34$--$1{,}67\times$ ở $c \le 8$ trên cả ba workload, và chỉ tụt dưới 1 ở mức tải cao ($0{,}58$--$0{,}68\times$ ở $c=32$). Như vậy, ở chế độ thực thi tương đồng, EAGLE-3.1 với ngân sách cố định nhỏ là cấu hình nhanh nhất ở tải thấp và vừa, còn không cấu hình suy đoán nào vượt \texttt{vanilla} ở $c = 32$.
+
+Telemetry từng bước của R6 (hơn 880\,000 quyết định) cho phép giải thích kết quả này. Ở $B \le 12$, bộ điều khiển chủ yếu chọn $k=1$ (khoảng 50--75\% quyết định) hoặc $k=3$, với tốc độ tương đối dự đoán $\hat{S} \approx 1{,}4$. Từ $B \ge 13$, khi chi phí $C(k, B)$ với $k > 0$ tăng mạnh theo Bảng~\ref{tab:ho-so-a10g}, bộ điều khiển chọn $k = 0$ cho 65--97\% quyết định tuỳ kích thước batch. Các quyết định này đúng với mô hình chi phí, nhưng tốc độ đo được thấp hơn nhiều so với dự đoán vì ba lý do.
+
+Thứ nhất, \textbf{hồ sơ chi phí đánh giá thấp thời gian thực của một bước}. Khoảng thời gian thực giữa hai bước liên tiếp của một yêu cầu ở $B=1$ có trung vị $23{,}6$--$28{,}1$~ms tuỳ $k$, trong khi hồ sơ ghi $15{,}2$--$19{,}7$~ms. Phần chênh lệch khoảng 6--9~ms gồm phần tính logit và lấy mẫu của mô hình đích, chi phí của bộ lập lịch tuỳ biến và cơ chế quy phản hồi, vốn nằm ngoài định nghĩa đại lượng đo (Mục~\ref{sec:ho-so}). Vì phần chi phí cố định này không xuất hiện trong mô hình, $\hat S$ bị thổi phồng: dự đoán $1{,}4\times$ nhưng đo được chỉ khoảng $1{,}08\times$ ở W1.
+
+Thứ hai, \textbf{$k = 0$ không đưa hệ thống về tốc độ của giải mã thường}. Ở $B = 32$, các bước $k = 0$ của R6 có chu kỳ trung vị $37{,}8$~ms, trong khi TPOT của \texttt{vanilla} ở $c = 32$ chỉ khoảng $17$--$19$~ms. Nguyên nhân là đầu nháp EAGLE vẫn phải chạy để đồng bộ KV cache, cộng với chi phí của bộ lập lịch tuỳ biến và bộ thực thi quy phản hồi ở batch lớn. Do đó, cơ chế ``tắt suy đoán'' của bộ điều khiển không thể loại bỏ tăng tốc âm khi máy chủ vẫn được khởi chạy ở chế độ có bộ nháp; đây cũng là kết luận đã quan sát ở Adaptive v0.
+
+Thứ ba, \textbf{mô hình $\mathbb{E}[\tau]$ lệch so với thực tế theo cả hai chiều}. Telemetry cho thấy xác suất chấp nhận ở từng vị trí (với điều kiện vị trí trước được chấp nhận) gần như không đổi, khoảng $0{,}50$--$0{,}61$, trong khi $\hat\alpha$ mà bộ điều khiển dùng là tỉ lệ trên toàn chuỗi nháp. Với $k=1$, mô hình dự đoán $0{,}38$ token được chấp nhận mỗi bước nhưng thực tế là $0{,}50$; với $k=4$, mô hình dự đoán $1{,}45$ nhưng thực tế chỉ $1{,}10$. Sai lệch này khẳng định giả thuyết đã nêu ở Chương~\ref{chap:thiet-ke}: ước lượng $\alpha$ cần được hiệu chỉnh trước khi đưa vào công thức kỳ vọng.
+
+Cần nhấn mạnh rằng kết quả này không bác bỏ hướng tiếp cận dựa trên chi phí, mà chỉ ra rằng hồ sơ chi phí phải đo đúng đại lượng được tối ưu (thời gian một bước đầu--cuối bao gồm chi phí cố định của hệ thống) và mô hình tỉ lệ chấp nhận phải được hiệu chỉnh theo vị trí. Trong lần chạy này, không có quyết định nào do lớp bảo vệ bộ nhớ đưa ra, nên lớp đó chưa được kiểm chứng trong điều kiện áp lực bộ nhớ thực.
+
+\subsection{Tính lossless}
+\label{subsec:kq-lossless}
+
+Phép kiểm tra lossless chạy cùng bộ 54 prompt (30 của W1, 12 của W2, 12 của W3) ở nhiệt độ 0 và mức đồng thời 1 trên các làn, so sánh chuỗi token ID đầu ra. Bảng~\ref{tab:lossless} tổng hợp kết quả của hai lần kiểm tra.
+
+\begin{table}[htbp]
+\centering
+\caption{Số prompt có đầu ra khớp từng token với làn \texttt{vanilla} (trên 54 prompt)}
+\label{tab:lossless}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{28mm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{40mm}@{}}
+\toprule
+\textbf{Lần kiểm tra} & \textbf{So sánh} & \textbf{Số prompt khớp} \\
+\midrule
+M2-03 (T4, 18/10) & \texttt{vanilla} lặp lại với chính nó & 54/54 \\
+ & \texttt{adaptive} v0 lặp lại với chính nó & 54/54 \\
+ & \texttt{vanilla} và \texttt{adaptive} v0 (hai cặp) & 44/54 (W1 25/30, W2 12/12, W3 7/12) \\
+\midrule
+R6 (A10G, 23/11) & \texttt{vanilla} lặp lại với chính nó & 54/54 \\
+ & \texttt{vanilla} và EAGLE $K = 3$ & 30/54 \\
+ & \texttt{vanilla} và EAGLE + R6 & 34/54 (W1 21/30, W2 12/12, W3 1/12) \\
+\bottomrule
+\end{tabularx}
+
+\vspace{2pt}
+{\footnotesize Nguồn: \path{experiments/runs/m2_03/protocol_b_20261018T085118Z_2aad4c00/summary.json}; thư mục đo lại R6 ngày 23/11/2026 (\path{r6-remeasure-2311/results/r6-2311b-lossless/}). Ở M2-03 có 7 cặp đầu ra bị cắt ở giới hạn token.}
+\end{table}
+
+Mỗi làn tự lặp lại cho kết quả giống hệt nhau, nên hệ thống là tất định. Tuy nhiên, đầu ra của các làn suy đoán không khớp hoàn toàn với \texttt{vanilla}, và mức khớp thấp nhất ở W3 (văn bản dài, nhiều vị trí lựa chọn gần nhau). Để tìm nguyên nhân, nhóm lấy top-5 logprob tại các vị trí bắt đầu lệch trong lần kiểm tra R6. Tại mọi điểm lệch, khoảng cách logprob giữa token hạng 1 và hạng 2 của \texttt{vanilla} bằng 0 hoặc bằng $0{,}125$, tức đúng một bước làm tròn của giá trị logit ở độ chính xác bfloat16; trên toàn bộ 13\,869 token đầu ra của \texttt{vanilla}, khoảng cách này có trung vị $11{,}25$ và chỉ $0{,}7\%$ vị trí có khoảng cách dưới $0{,}05$. Token mà làn EAGLE chọn tại điểm lệch luôn là token có logit lớn nhất của chính mô hình đích trong lượt xác thực (44/44 trường hợp), và thường là token hạng 2 của \texttt{vanilla}. Trên đoạn đầu giống nhau, logprob giữa hai đường tính chênh nhau khoảng $0{,}08$--$0{,}1$.
+
+Kết luận là các điểm lệch không do lỗi của tiêu chí chấp nhận hay của bộ điều khiển, mà do đúng hiện tượng số học đã nêu ở Mục~\ref{subsec:lossless}: lượt xác thực nhiều token tính logit qua đường thực thi khác với bước decode một token, sai khác cỡ một bước làm tròn bfloat16 đủ đảo thứ hạng tại các vị trí gần hoà điểm, và văn bản rẽ nhánh từ đó. Làn EAGLE $K=3$ cố định lệch nhiều hơn R6 (30/54 so với 34/54) và thường lệch ở cùng vị trí, cho thấy hiện tượng không đặc thù cho bộ điều khiển. Vì vậy, đồ án không khẳng định đầu ra ``khớp từng ký tự'' trên phần cứng thực, mà khẳng định: giải mã suy đoán bảo toàn phân phối về lý thuyết; trên GPU, đầu ra tham lam khớp từng token ở một phần các prompt, và mọi điểm lệch quan sát được đều rơi vào các vị trí hoà điểm trong giới hạn độ chính xác bfloat16. Việc kiểm tra với logit độ chính xác cao hơn hoặc chế độ tính bất biến theo batch chưa được thực hiện.
+
+\subsection{Chất lượng nghiệp vụ của quy trình hoá đơn}
+\label{subsec:kq-chat-luong}
+
+Vì đầu ra không khớp từng ký tự, nhóm kiểm tra trực tiếp xem thông tin nghiệp vụ có bị ảnh hưởng hay không. Nút 1 được chạy trên 30 hoá đơn của W1 với năm lần chạy trên A10G (chiến dịch M4-03): \texttt{vanilla} hai lần để ước lượng dao động tự nhiên, \texttt{static}, \texttt{adaptive} v0 và \texttt{eagle}. Bốn trường được chấm theo nhãn gốc của MC-OCR. Bảng~\ref{tab:m403} trình bày kết quả.
+
+\begin{table}[htbp]
+\centering
+\caption{Số trường khớp với nhãn MC-OCR trên 30 hoá đơn theo lần chạy (M4-03, A10G)}
+\label{tab:m403}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Lần chạy} & \textbf{JSON hợp lệ} & \textbf{Người bán} & \textbf{Địa chỉ} & \textbf{Thời gian} & \textbf{Tổng tiền} \\
+\midrule
+\texttt{vanilla} (lần 1) & 30/30 & 29/30 & 27/30 & 30/30 & 30/30 \\
+\texttt{vanilla} (lần 2) & 30/30 & 29/30 & 28/30 & 30/30 & 30/30 \\
+\texttt{static} & 30/30 & 29/30 & 27/30 & 30/30 & 30/30 \\
+\texttt{adaptive} v0 & 30/30 & 29/30 & 27/30 & 30/30 & 30/30 \\
+\texttt{eagle} & 30/30 & 29/30 & 27/30 & 30/30 & 30/30 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+{\footnotesize Nguồn: \path{experiments/results/m4_03_entity_match.md}; bằng chứng từng lần chạy ở \path{experiments/runs/m4_03/}.}
+\end{table}
+
+Ba làn suy đoán có số trường khớp bằng đúng \texttt{vanilla} lần 1 ở cả bốn trường; chênh lệch nằm trong dao động giữa hai lần \texttt{vanilla} (3,3 điểm ở trường địa chỉ, do một mẫu). Các mẫu lệch giống nhau giữa các làn và có nguyên nhân không liên quan tới làn phục vụ, ví dụ cách chia dòng giữa tên cửa hàng và địa chỉ. Ở cấp văn bản, toàn văn JSON giữa hai lần \texttt{vanilla} giống nhau ở 25/30 mẫu, còn giữa \texttt{vanilla} và các làn suy đoán chỉ ở 13--15/30 mẫu; khác biệt tập trung ở siêu dữ liệu bằng chứng, khoảng trắng và cách viết giờ (ví dụ \texttt{12:03} so với \texttt{12:03:00}). Kết quả tương tự được quan sát trong lần kiểm tra R6: cả ba nhánh đạt người bán 29/30, thời gian 30/30, tổng tiền 30/30 và địa chỉ 27--28/30. Như vậy, trên 30 hoá đơn và bốn trường được chấm, không quan sát thấy suy giảm độ chính xác khi bật giải mã suy đoán.
+
+Về quy trình đầy đủ W4, lần chạy nghiệm thu trên A10G với làn \texttt{vanilla} cho Nút 1 hợp lệ 30/30, Nút 2 trả về 4 câu \texttt{ok} và 2 câu rỗng trên 6 câu hỏi, không có lỗi thực thi, và Nút 3 sinh báo cáo kết thúc tự nhiên. Kiểm tra thủ công cho thấy mọi con số trong báo cáo đều có trong bảng kết quả truy vấn. Lần chạy cũng bộc lộ giới hạn chất lượng của mô hình đích: với câu hỏi về cửa hàng có tổng giá trị cao nhất, mô hình sinh SQL tìm hoá đơn lớn nhất thay vì cộng tổng theo cửa hàng; câu SQL hợp lệ về cú pháp nên vượt qua lớp kiểm tra. Vì giải mã suy đoán không thay đổi phân phối đầu ra, các làn suy đoán kế thừa đúng giới hạn này; đây là giới hạn của mô hình 7B lượng tử hoá, không phải của engine. Dữ liệu W1 cũng không chứa dòng hàng và thuế, nên các câu hỏi về thuế mới chỉ kiểm tra được nhánh ``không có dữ liệu''.
+
+%=====================================================================
+\section{Thảo luận}
+\label{sec:thao-luan}
+
+\textbf{RQ1 -- Thích ứng theo chi phí đo có cải thiện tốc độ so với cấu hình cố định không?} Với các phiên bản bộ điều khiển hiện có, câu trả lời là \emph{chưa}. Adaptive v0 kém \texttt{static} ở hầu hết các ô trên cả T4 và L4; bộ điều khiển theo chi phí R6 kém EAGLE $K=3$ cố định ở mọi ô trên A10G. Nguyên nhân không nằm ở ý tưởng dùng chi phí đo, mà ở ba điểm cụ thể đã xác định được bằng telemetry: hồ sơ chi phí bỏ sót phần chi phí cố định của một bước phục vụ, $k = 0$ không rẻ như giải mã thường khi bộ nháp vẫn được nạp, và mô hình tỉ lệ chấp nhận chưa được hiệu chỉnh theo vị trí.
+
+\textbf{RQ2 -- Cơ chế thích ứng có loại bỏ được tăng tốc âm và tràn bộ nhớ không?} Tăng tốc âm \emph{không} được loại bỏ. Vì lựa chọn $k = 0$ vẫn để bộ nháp chạy, mọi cấu hình có bộ nháp đều chậm hơn \texttt{vanilla} ở tải cao, kể cả khi bộ điều khiển đã chọn tắt suy đoán cho hầu hết các bước. Muốn loại bỏ hoàn toàn tăng tốc âm, hệ thống cần một cơ chế tắt suy đoán ở cấp máy chủ (không chạy bộ nháp) chứ không chỉ ở cấp số token nháp. Về bộ nhớ, không có lỗi tràn bộ nhớ trong mọi chiến dịch, nhưng lớp bảo vệ bộ nhớ chưa từng được kích hoạt trong các lần đo, nên chưa có bằng chứng thực nghiệm về hiệu quả của nó.
+
+\textbf{RQ3 -- Loại tác vụ nào được hưởng lợi?} Kết quả nhất quán qua các GPU cho thấy lợi ích phụ thuộc vào cả loại nội dung, loại bộ nháp và mức tải, có thể tóm tắt thành bản đồ sử dụng sau. Ở tải thấp và vừa ($c \le 8$), giải mã suy đoán có lợi rõ rệt: với mô hình nháp 0,5B, chỉ các tác vụ có cấu trúc (JSON, SQL) được hưởng lợi ($1{,}2$--$1{,}4\times$), còn văn xuôi tự do thì không; với đầu nháp EAGLE-3.1, cả ba loại tác vụ đều được hưởng lợi ($1{,}3$--$1{,}7\times$ trên A10G ở chế độ eager), nên đây là lựa chọn tốt hơn cho các quy trình tác tử gọi mô hình tuần tự với ít yêu cầu đồng thời. Ở tải cao ($c \ge 16$), không cấu hình suy đoán nào trong đồ án vượt được giải mã thường; các hệ thống phục vụ thông lượng lớn nên tắt giải mã suy đoán. Trong quy trình hoá đơn, độ trễ của Nút 1 (đầu ra JSON dài, chiếm phần lớn thời gian) là nơi giải mã suy đoán mang lại lợi ích lớn nhất.
+
+\textbf{Về ý nghĩa của kết quả âm tính.} Các kết quả trên trái với kỳ vọng ban đầu của đồ án rằng bộ điều khiển thích ứng sẽ đảm bảo tốc độ không bao giờ tệ hơn giải mã thường. Nhóm trình bày đầy đủ các kết quả này vì chúng có giá trị: chúng xác định cụ thể vì sao một bộ điều khiển dựa trên chi phí thành phần không đủ, và chỉ ra các thay đổi cần thiết (đo chi phí đầu--cuối của một bước, hiệu chỉnh $\alpha$ theo vị trí, tắt bộ nháp ở cấp máy chủ khi tải cao) mà các nghiên cứu chỉ đánh giá ở batch 1 trên GPU cao cấp không bộc lộ.
+
+%=====================================================================
+\section{Các yếu tố đe doạ tính hợp lệ}
+\label{sec:de-doa}
+
+\textbf{Tính hợp lệ bên trong.} Các GPU đám mây dùng chung tài nguyên máy chủ có thể gây nhiễu thời gian. Nhóm giảm thiểu bằng khởi động trước mỗi ô, 5 lần lặp, dùng trung vị và gắn cờ biến thiên; mọi ô của các chiến dịch tốc độ đều dưới ngưỡng biến thiên 15\%. Các làn thích ứng dùng chế độ eager trong khi các làn cố định ở M1, M2-04 và M3-05 dùng CUDA graph, nên so sánh ở các chiến dịch này lẫn hiệu ứng của chế độ thực thi; chiến dịch R6 khắc phục điều này bằng hợp đồng thực thi tương đồng.
+
+\textbf{Tính hợp lệ bên ngoài.} Kết quả chỉ gồm một mô hình đích (Qwen2.5-7B-Instruct AWQ), hai loại bộ nháp và ba loại GPU, mỗi chiến dịch chạy trên một loại GPU; kết luận có thể không chuyển sang mô hình hay phần cứng khác. Hồ sơ chi phí hợp lệ chỉ có cho A10G, nên bộ điều khiển theo chi phí chưa được đánh giá trên T4 hay L4. Workload có quy mô nhỏ (30 và 12 mẫu được dùng lại theo vòng) và thuộc một miền nghiệp vụ.
+
+\textbf{Tính hợp lệ của cấu trúc đo.} Đại lượng $\alpha$ trong các bảng là tỉ lệ trên toàn chuỗi nháp, không phải xác suất chấp nhận theo vị trí, nên không so trực tiếp được với $\tau$ hay với số liệu của các bài báo. Hệ số tăng tốc được tính theo TPOT, phản ánh pha decode chứ không phản ánh TTFT. Nhãn của MC-OCR không được đưa vào prompt, nên kết quả trích xuất không bị rò rỉ nhãn. Đánh giá chất lượng dùng 30 hoá đơn và bốn trường, một mẫu tương ứng 3,3 điểm phần trăm.
+
+\section{Kết chương}
+
+Chương này đã trình bày kết quả của bảy chiến dịch thực nghiệm trên ba loại GPU. Giải mã suy đoán với ngân sách cố định nhỏ tăng tốc rõ rệt ở tải thấp và vừa, đặc biệt với đầu nháp EAGLE-3.1, nhưng gây tăng tốc âm ở tải cao. Hai phiên bản bộ điều khiển thích ứng của đồ án chưa vượt được cấu hình cố định và chưa loại bỏ được tăng tốc âm; telemetry đã xác định ba nguyên nhân cụ thể. Đầu ra của các làn suy đoán không khớp hoàn toàn với giải mã thường do sai khác số học tại các vị trí hoà điểm bfloat16, nhưng chất lượng trích xuất nghiệp vụ không thay đổi. Phần Kết luận tổng hợp các đóng góp, hạn chế và hướng phát triển dựa trên các kết quả này.

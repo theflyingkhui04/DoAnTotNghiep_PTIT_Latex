@@ -1,0 +1,61 @@
+% PROJECT DO AN TOT NGHIEP PTIT - EDIT main.tex AND thong-tin.tex
+% Overleaf: Menu > Compiler > pdfLaTeX; main document = main.tex
+\documentclass[14pt,a4paper,oneside]{extreport}
+
+\input{thong-tin}
+\usepackage{styles/ptit-thesis}
+
+\begin{document}
+\hypersetup{pageanchor=false}% Tranh trung anchor trang bia va trang 1 cua noi dung
+\input{frontmatter/trang-bia}
+
+% Cac trang phu co the bat/tat tai thong-tin.tex
+\ifCoTrangLot\input{frontmatter/trang-lot}\fi
+\pagenumbering{roman}
+\hypersetup{pageanchor=true}
+\pagestyle{plain}
+\ifCoDeCuong\input{frontmatter/de-cuong}\fi
+\ifCoPhanCong\input{frontmatter/phan-cong}\fi
+
+\input{frontmatter/cam-doan}
+\ifCoCamDoanTurnitin\input{frontmatter/cam-doan-turnitin}\fi
+\input{frontmatter/loi-cam-on}
+
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{MỤC LỤC}
+\tableofcontents
+
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{DANH MỤC CÁC HÌNH VẼ}
+\listoffigures
+
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{DANH MỤC CÁC BẢNG BIỂU}
+\listoftables
+
+\input{frontmatter/tu-viet-tat}
+
+% So trang 1 bat dau tai MO DAU (theo file PDF huong dan)
+\cleardoublepage
+\pagenumbering{arabic}
+\ifHienHeader\pagestyle{fancy}\else\pagestyle{plain}\fi
+\input{chapters/00-mo-dau}
+\input{chapters/01-tong-quan}
+\input{chapters/02-thiet-ke}
+\input{chapters/03-trien-khai}
+\input{chapters/04-thuc-nghiem}
+\input{chapters/05-ket-luan}
+
+% Danh muc tai lieu tham khao. Chi can pdfLaTeX; khong can BibTeX/Biber.
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{TÀI LIỆU THAM KHẢO}
+\input{references}
+
+% Bo dau % neu can them phu luc:
+% \appendix
+% \input{chapters/phu-luc}
+\end{document}

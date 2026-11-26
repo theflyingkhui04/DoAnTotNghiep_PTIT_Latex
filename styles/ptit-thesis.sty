@@ -1,0 +1,141 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/ptit-thesis}[2026/11/22 PTIT thesis formatting for pdfLaTeX]
+% pdfLaTeX + T5 de go tieng Viet co dau. Khong su dung fontspec hay XeLaTeX.
+% Anh xa glyph -> Unicode de PDF sao chep / tim kiem / Turnitin doc dung chu Viet.
+\input{glyphtounicode}
+\pdfgentounicode=1
+\RequirePackage[T5]{fontenc}
+\RequirePackage[utf8]{inputenc}
+% TeX Gyre Termes (font giong Times New Roman), ho tro T5 tren Overleaf.
+\RequirePackage{tgtermes}
+% Cho phep font toan (CM) co gian theo co chu 13pt, tranh canh bao Font shape not available.
+\RequirePackage{anyfontsize}
+\RequirePackage[vietnamese]{babel}
+\RequirePackage{geometry}
+\ifTheoLeMauWord
+  \geometry{a4paper,left=25mm,right=18mm,top=20mm,bottom=20mm,headheight=14pt}
+\else
+  \geometry{a4paper,left=30mm,right=20mm,top=25mm,bottom=25mm,headheight=14pt}
+\fi
+% extreport khong ho tro class option 13pt. Dinh nghia lai body 13pt
+% va line spacing ~1.27 theo PDF. Muon body 14pt: doi {13pt}{16pt} thanh {14pt}{18pt}.
+\makeatletter
+\renewcommand{\normalsize}{%
+  \@setfontsize\normalsize{13pt}{16pt}%
+  \abovedisplayskip 10pt plus 2pt minus 3pt%
+  \abovedisplayshortskip 0pt plus 2pt%
+  \belowdisplayshortskip 6pt plus 2pt minus 3pt%
+  \belowdisplayskip \abovedisplayskip%
+}
+\makeatother
+\normalsize
+\RequirePackage{setspace}
+\setstretch{1.03}
+\setlength{\parindent}{1cm}
+\setlength{\parskip}{4pt}
+% Cho phep gian chu them khi dong co ten lop/ham dai (\texttt), tranh tran le.
+\setlength{\emergencystretch}{3em}
+\RequirePackage{titlesec}
+\RequirePackage{tocloft}
+\RequirePackage{graphicx}
+\RequirePackage{float}
+\RequirePackage{booktabs}
+\RequirePackage{longtable}
+\RequirePackage{tabularx}
+\RequirePackage{array}
+\RequirePackage{multirow}
+\RequirePackage{amsmath,amssymb}
+\RequirePackage{siunitx}
+\RequirePackage{caption}
+\RequirePackage{subcaption}
+\RequirePackage{fancyhdr}
+% Bo sung cho noi dung do an: so do TikZ, thuat toan, mau danh dau.
+\RequirePackage{xcolor}
+\RequirePackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,shapes.geometric,backgrounds}
+\RequirePackage{pgfplots}
+\pgfplotsset{compat=1.18, /pgf/number format/use comma}
+\usepgfplotslibrary{groupplots}
+\RequirePackage{algorithm}
+\RequirePackage{algpseudocode}
+\RequirePackage[hyphens]{url}
+% \path{...}: duong dan tep / co dong lenh, ngat duoc sau / _ - ma khong chen gach noi.
+\urlstyle{tt}
+% Cho phep ngat dong trong chu don cach (ten ham, co dong lenh) va sau dau gach duoi.
+\RequirePackage[htt]{hyphenat}
+% Xuong dong sau dau gach duoi nhung KHONG chen them dau gach noi (giu dung ten ham).
+\renewcommand{\_}{\textunderscore\allowbreak}
+\RequirePackage[hidelinks,unicode,bookmarksnumbered=true]{hyperref}
+\RequirePackage{bookmark}
+\hypersetup{pdftitle={Đồ án tốt nghiệp: \TenDeTai},pdfauthor={\TenSinhVien}}
+\renewcommand{\bibname}{TÀI LIỆU THAM KHẢO}
+\setcounter{tocdepth}{3}
+\setcounter{secnumdepth}{3}
+
+% Cap chuong: chu in hoa, dam, o giua, chuong + so tren mot dong rieng.
+\titleformat{\chapter}[display]
+ {\normalfont\bfseries\centering\fontsize{16}{20}\selectfont}
+ {CHƯƠNG \thechapter}{5pt}{\MakeUppercase}
+\titlespacing*{\chapter}{0pt}{0pt}{20pt}
+\titleformat{name=\chapter,numberless}[block]
+ {\normalfont\bfseries\centering\fontsize{16}{20}\selectfont}{}{0pt}{\MakeUppercase}
+\titlespacing*{name=\chapter,numberless}{0pt}{0pt}{16pt}
+\titleformat{\section}{\normalfont\bfseries\fontsize{14}{18}\selectfont}{\thesection}{0.8em}{}
+\titlespacing*{\section}{0pt}{14pt}{6pt}
+\titleformat{\subsection}{\normalfont\bfseries\fontsize{13}{17}\selectfont}{\thesubsection}{0.8em}{}
+\titlespacing*{\subsection}{0pt}{10pt}{6pt}
+\titleformat{\subsubsection}{\normalfont\bfseries\itshape\fontsize{13}{17}\selectfont}{\thesubsubsection}{0.8em}{}
+\titlespacing*{\subsubsection}{0pt}{10pt}{6pt}
+
+% Tieu de muc luc, danh muc theo mau.
+\renewcommand{\contentsname}{\makebox[\linewidth][c]{MỤC LỤC}}
+\renewcommand{\listfigurename}{\makebox[\linewidth][c]{DANH MỤC CÁC HÌNH VẼ}}
+\renewcommand{\listtablename}{\makebox[\linewidth][c]{DANH MỤC CÁC BẢNG BIỂU}}
+% Babel cap nhat nhan sau khi vao document, cho nen gan trong captionsvietnamese.
+\addto\captionsvietnamese{%
+  \renewcommand{\contentsname}{\makebox[\linewidth][c]{MỤC LỤC}}%
+  \renewcommand{\listfigurename}{\makebox[\linewidth][c]{DANH MỤC CÁC HÌNH VẼ}}%
+  \renewcommand{\listtablename}{\makebox[\linewidth][c]{DANH MỤC CÁC BẢNG BIỂU}}%
+}
+\renewcommand{\cfttoctitlefont}{\bfseries\fontsize{16}{20}\selectfont}
+\renewcommand{\cftaftertoctitle}{}
+\renewcommand{\cftloftitlefont}{\bfseries\fontsize{16}{20}\selectfont}
+\renewcommand{\cftafterloftitle}{}
+\renewcommand{\cftlottitlefont}{\bfseries\fontsize{16}{20}\selectfont}
+\renewcommand{\cftafterlottitle}{}
+\renewcommand{\cftchappresnum}{CHƯƠNG\ }
+\renewcommand{\cftchapaftersnum}{.\ }
+\renewcommand{\cftchapleader}{\cftdotfill{\cftdotsep}}
+\setlength{\cftchapnumwidth}{6.5em}
+\setlength{\cftsecnumwidth}{3.2em}
+\setlength{\cftsubsecnumwidth}{4.2em}
+\setlength{\cftbeforechapskip}{5pt}
+\renewcommand{\cftdotsep}{1}
+\captionsetup{font=small,labelfont=bf,justification=centering}
+\renewcommand{\figurename}{Hình}
+\renewcommand{\tablename}{Bảng}
+\numberwithin{figure}{chapter}
+\numberwithin{table}{chapter}
+\numberwithin{algorithm}{chapter}
+\floatname{algorithm}{Thuật toán}
+\renewcommand{\algorithmicrequire}{\textbf{Đầu vào:}}
+\renewcommand{\algorithmicensure}{\textbf{Đầu ra:}}
+
+% Danh dau phan con thieu du lieu: hien chu do trong PDF, de tim bang "CẦN BỔ SUNG".
+\newcommand{\CanBoSung}[1]{\textcolor{red}{[CẦN BỔ SUNG: #1]}}
+
+% Header/footer la tuy chon (huong dan PDF noi co the co/khong).
+\pagestyle{plain}
+\fancyhf{}
+\fancyhead[L]{\footnotesize\bfseries\itshape Đồ án tốt nghiệp Đại học}
+\fancyhead[R]{\footnotesize\bfseries\itshape Chương~\thechapter}
+\fancyfoot[L]{\footnotesize\TenSinhVien, \LopSinhVien}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Tieu de trang khong danh so, co hien trong muc luc.
+\newcommand{\TrangKhongSo}[1]{%
+ \cleardoublepage\chapter*{#1}%
+ \phantomsection\addcontentsline{toc}{chapter}{#1}%
+}

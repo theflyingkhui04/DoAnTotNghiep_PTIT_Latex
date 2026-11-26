@@ -1,0 +1,352 @@
+\chapter{Phân tích và thiết kế hệ thống}
+\label{chap:thiet-ke}
+
+Chương này trình bày phân tích bài toán và thiết kế hệ thống FlexSDS. Mục~\ref{sec:phan-tich} phát biểu bài toán chọn ngân sách nháp dưới dạng một bài toán tối ưu có ràng buộc. Mục~\ref{sec:yeu-cau} xác định các yêu cầu chức năng và phi chức năng. Mục~\ref{sec:kien-truc} mô tả kiến trúc tổng thể. Các mục tiếp theo trình bày thiết kế chi tiết của ba thành phần cốt lõi: hồ sơ chi phí phần cứng (Mục~\ref{sec:ho-so}), bộ điều khiển ngân sách nháp (Mục~\ref{sec:bo-dieu-khien}) và cơ chế tích hợp vào bộ lập lịch của vLLM (Mục~\ref{sec:tich-hop}). Mục~\ref{sec:lan-doi-chung} và Mục~\ref{sec:ung-dung-do} mô tả các làn đối chứng và ứng dụng dùng để đo. Mục~\ref{sec:quyet-dinh} tổng hợp các quyết định thiết kế quan trọng.
+
+%=====================================================================
+\section{Phân tích bài toán}
+\label{sec:phan-tich}
+
+\subsection{Bối cảnh sử dụng}
+
+Hệ thống hướng tới tình huống một tổ chức hoặc cá nhân tự triển khai một mô hình ngôn ngữ mã nguồn mở trên một GPU trên hai nền tảng Modal.com hoặc Google Colab để phục vụ các quy trình tự động hoá. Các quy trình này thường được xây dựng trên nền tảng điều phối như Dify hay LangGraph, gọi mô hình nhiều lần nối tiếp nhau qua API tương thích OpenAI, nên độ trễ của từng lời gọi cộng dồn vào độ trễ của cả quy trình. 
+
+Có ba nhóm tác nhân trong hệ thống bao gồm: (1) \textit{người vận hành} chọn mô hình đích, bộ nháp và GPU, đo hồ sơ phần cứng và khởi chạy máy chủ; (2) \textit{ứng dụng client} gửi request có dạng \texttt{/v1/chat/completions} và (3) \textit{người nghiên cứu} chạy các phép đo đối chứng giữa các cấu hình phục vụ và thu thập telemetry.
+
+\subsection{Phát biểu bài toán}
+\label{subsec:bai-toan}
+
+Phân tích ở Mục~\ref{subsec:phan-tich-tang-toc} cho thấy lợi ích của giải mã suy đoán phụ thuộc vào ba đại lượng thay đổi trong lúc chạy: xác suất chấp nhận của bộ nháp trên nội dung đang sinh, kích thước batch hiện tại, và chi phí của một bước trên GPU cụ thể ứng với từng độ dài nháp. Bài toán của đồ án là chọn $K$ trong lúc phục vụ sao cho tốc độ sinh token kỳ vọng là lớn nhất, đồng thời không gây tràn bộ nhớ và không thay đổi đầu ra.
+
+Gọi $\mathcal{K} = \{0, 1, \dots, K_{\max}\}$ là tập ngân sách sinh token của bộ nháp, trong đó $K=0$ nghĩa là không sinh token nháp. Tại bước lập lịch $t$, với kích thước batch $B_t$ và ước lượng tỉ lệ chấp nhận $\hat{\alpha}_t$ của một yêu cầu, gọi $C(k, B)$ là thời gian một bước khi mỗi yêu cầu trong batch được cấp $k$ token nháp, đo trước trên đúng GPU đang chạy. Tốc độ tương đối kỳ vọng của lựa chọn $k$ được ước lượng bởi
+\begin{equation}\label{eq:s-hat}
+  \hat{S}_t(k) = \mathbb{E}\bigl[\tau(k, \hat{\alpha}_t)\bigr] \cdot \frac{C_{\text{ref}}(B_t)}{C(k, B_t)},
+  \qquad C_{\text{ref}}(B) = \min_{j \in \mathcal{K}} C(j, B),
+\end{equation}
+với $\mathbb{E}[\tau(k,\alpha)] = 1 + \sum_{i=1}^{k} \alpha^{i}$ theo~\eqref{eq:tau-ky-vong}. Bài toán chọn ngân sách tại bước $t$ là
+\begin{equation}\label{eq:bai-toan}
+  k_t^\ast =
+  \begin{cases}
+    0, & \text{nếu điều kiện bộ nhớ bị vi phạm},\\[2pt]
+    \arg\max\limits_{k \in \mathcal{K}\setminus\{0\},\; \hat{S}_t(k) \ge s_{\min}} \hat{S}_t(k), & \text{nếu tập này khác rỗng},\\[2pt]
+    0, & \text{trong trường hợp còn lại},
+  \end{cases}
+\end{equation}
+trong đó $s_{\min} \ge 1$ là biên lợi ích tối thiểu để bật suy đoán. So với mô hình~\eqref{eq:speedup}, công thức~\eqref{eq:s-hat} thay giả định $C_V(K) \approx C_T$ bằng chi phí đo thực $C(k, B)$, nhờ đó phản ánh được cả việc chi phí xác thực tăng theo kích thước batch. Ràng buộc then chốt là bộ điều khiển chỉ được thay đổi \emph{số lượng} token nháp; tiêu chí chấp nhận của engine giữ nguyên, nên tính lossless về lý thuyết được bảo toàn (Mục~\ref{subsec:lossless}).
+
+\subsection{Câu hỏi nghiên cứu}
+
+Thiết kế của hệ thống được định hướng bởi ba câu hỏi nghiên cứu đã nêu trong phần Mở đầu. RQ1 hỏi việc chọn ngân sách nháp theo chi phí đo được trên phần cứng có cải thiện tốc độ so với cấu hình cố định hay không. RQ2 hỏi cơ chế thích ứng có loại bỏ được tăng tốc âm và tràn bộ nhớ hay không. RQ3 hỏi loại tác vụ nào trong một quy trình thực tế được hưởng lợi từ giải mã suy đoán. Các câu hỏi này đặt ra yêu cầu về khả năng đo và so sánh, không chỉ về khả năng phục vụ.
+
+%=====================================================================
+\section{Yêu cầu hệ thống}
+\label{sec:yeu-cau}
+
+\subsection{Yêu cầu chức năng}
+
+Bảng~\ref{tab:yeu-cau-chuc-nang} liệt kê các yêu cầu chức năng được rút ra từ bối cảnh sử dụng và câu hỏi nghiên cứu.
+
+\begin{table}[htbp]
+\centering
+\caption{Yêu cầu chức năng của hệ thống FlexSDS}
+\label{tab:yeu-cau-chuc-nang}
+\small
+\begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Mã} & \textbf{Nội dung yêu cầu} \\
+\midrule
+FR-01 & Phục vụ mô hình đích qua giao diện HTTP tương thích OpenAI (\texttt{/v1/models}, \texttt{/v1/chat/completions}), để ứng dụng client không cần sửa đổi. \\
+FR-02 & Hỗ trợ hai loại bộ nháp: mô hình nháp độc lập (\texttt{draft\_model}) và đầu nháp EAGLE-3 (\texttt{eagle3}); kiểm tra tính tương thích giữa mô hình đích và bộ nháp trước khi khởi chạy. \\
+FR-03 & Đo hồ sơ chi phí $C(k, B)$ trên GPU đích, lưu thành tệp có bằng chứng đo và gắn với phiên bản mô hình. \\
+FR-04 & Chọn ngân sách nháp $k$ cho từng yêu cầu ở từng bước lập lịch theo~\eqref{eq:bai-toan}, có khả năng tắt suy đoán ($k=0$). \\
+FR-05 & Bảo vệ bộ nhớ: ép $k=0$ khi KV cache hoặc VRAM trống chạm ngưỡng nguy hiểm. \\
+FR-06 & Ghi telemetry từng bước và từng yêu cầu: $k$ được chọn, lý do, $\alpha$ ước lượng, chi phí tra cứu, số token nháp và số token được chấp nhận. \\
+FR-07 & Cung cấp các chế độ đối chứng chạy trên cùng hợp đồng thực thi: giải mã thường (\texttt{vanilla}) và suy đoán với $K$ cố định (\texttt{static}). \\
+FR-08 & Khởi chạy trên GPU cục bộ hoặc trên GPU đám mây (Modal), và chỉ báo sẵn sàng sau khi đã có một lần sinh văn bản thành công. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Yêu cầu phi chức năng}
+
+Yêu cầu quan trọng nhất là \textbf{tính đúng đắn}: hệ thống không được sửa tiêu chí chấp nhận hay bộ lấy mẫu của engine, để tính lossless về lý thuyết của giải mã suy đoán được giữ nguyên. Thứ hai là \textbf{an toàn khi thiếu thông tin}: chế độ thích ứng chỉ được bật khi có hồ sơ chi phí đo thật, hợp lệ và khớp với GPU, mô hình và phiên bản đang dùng; khi thiếu, hệ thống từ chối chạy chế độ thích ứng thay vì dùng giá trị giả định. Thứ ba là \textbf{chi phí điều khiển thấp}: quyết định ở mỗi bước chỉ gồm tra bảng và vài phép tính số học, không thêm lượt truyền xuôi hay đồng bộ GPU nào. Thứ tư là \textbf{khả năng tái lập}: phiên bản vLLM, revision của mô hình và mã băm của hồ sơ chi phí được ghim và ghi vào kết quả. Thứ năm là \textbf{khả năng kiểm thử}: toàn bộ logic quyết định phải chạy được và kiểm thử được trên CPU, không cần GPU hay vLLM. Cuối cùng, vì bộ lập lịch tuỳ biến phụ thuộc vào chi tiết nội bộ của vLLM, hệ thống chỉ hỗ trợ đúng phiên bản vLLM 0.30.0 và kiểm tra mã băm các tệp nguồn liên quan trước khi bật các thành phần tuỳ biến.
+
+%=====================================================================
+\section{Kiến trúc tổng thể}
+\label{sec:kien-truc}
+
+FlexSDS được tổ chức thành bốn tầng như Hình~\ref{fig:kien-truc}. \textbf{Tầng giao diện} gồm công cụ dòng lệnh \texttt{flexsds} dành cho người vận hành và các ứng dụng client gửi yêu cầu qua giao diện OpenAI. \textbf{Tầng điều khiển thích ứng} gồm hồ sơ chi phí phần cứng, mô hình chi phí và bộ điều khiển \texttt{AdaptiveDraftController}; tầng này không phụ thuộc vLLM. \textbf{Tầng tích hợp engine} gồm bộ lập lịch \texttt{AdaptiveAsyncScheduler} kế thừa bộ lập lịch bất đồng bộ của vLLM, bộ lập kế hoạch \texttt{AdaptiveBudgetPlanner} và bộ thực thi \texttt{LineageUniProcExecutor} dùng để quy phản hồi xác thực về đúng quyết định đã sinh ra nó. \textbf{Tầng thực thi} là máy chủ vLLM chạy mô hình đích và bộ nháp trên GPU, khởi chạy cục bộ hoặc trên nền tảng Modal.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize, node distance=4mm,
+  blk/.style={draw, rounded corners=2pt, fill=white, align=center, minimum height=8mm, inner sep=3pt},
+  lay/.style={draw, dashed, rounded corners=4pt, inner sep=5pt},
+  arr/.style={-{Stealth}, thick},
+]
+  % Tang giao dien
+  \node[blk, minimum width=33mm] (cli) {CLI \texttt{flexsds}\\serve · profile · test};
+  \node[blk, minimum width=33mm, right=6mm of cli] (app) {Ứng dụng client\\pipeline hoá đơn, bộ đo, web};
+  \node[blk, minimum width=33mm, right=6mm of app] (dify) {Nền tảng điều phối\\(Dify, LangGraph)};
+  % Tang dieu khien
+  \node[blk, minimum width=33mm, below=14mm of cli] (prof) {Hồ sơ chi phí\\$C(k,B)$ đã đo};
+  \node[blk, minimum width=33mm, right=6mm of prof] (ctl) {AdaptiveDraftController\\(một bộ cho mỗi yêu cầu)};
+  \node[blk, minimum width=33mm, right=6mm of ctl] (cost) {Mô hình chi phí\\$\hat S(k)$, $\alpha^\ast$};
+  % Tang tich hop
+  \node[blk, minimum width=33mm, below=14mm of prof] (sch) {AdaptiveAsyncScheduler};
+  \node[blk, minimum width=33mm, right=6mm of sch] (pl) {AdaptiveBudgetPlanner\\$K=\max_i k_i$};
+  \node[blk, minimum width=33mm, right=6mm of pl] (lin) {LineageUniProcExecutor\\(quy phản hồi)};
+  % Tang thuc thi
+  \node[blk, minimum width=33mm, below=14mm of sch] (tgt) {Mô hình đích\\Qwen2.5-7B AWQ};
+  \node[blk, minimum width=33mm, right=6mm of tgt] (drf) {Bộ nháp\\EAGLE-3 / 0,5B};
+  \node[blk, minimum width=33mm, right=6mm of drf] (gpu) {GPU: Modal (A10G, L4)\\hoặc cục bộ};
+  % Khung tang
+  \begin{scope}[on background layer]
+    \node[lay, fill=gray!8, fit=(cli)(dify), label={[font=\footnotesize\bfseries]left:Giao diện}] {};
+    \node[lay, fill=orange!8, fit=(prof)(cost), label={[font=\footnotesize\bfseries]left:Điều khiển}] {};
+    \node[lay, fill=blue!6, fit=(sch)(lin), label={[font=\footnotesize\bfseries]left:Tích hợp}] {};
+    \node[lay, fill=green!6, fit=(tgt)(gpu), label={[font=\footnotesize\bfseries]left:Thực thi}] {};
+  \end{scope}
+  % Mui ten
+  \draw[arr] (dify.east) -- ++(6mm,0) |- node[pos=0.25, right, font=\scriptsize, align=left] {yêu cầu\\HTTP\\OpenAI} (gpu.east);
+  \draw[arr] (app.east) -- (dify.west);
+  \draw[arr] (cli) -- node[left, font=\scriptsize] {đo hồ sơ} (prof);
+  \draw[arr] (prof) -- (ctl);
+  \draw[arr] (cost) -- (ctl);
+  \draw[arr] (pl.north) ++(-4mm,0) -- ++(0,7mm) node[left, font=\scriptsize] {$\alpha$, $B$, KV} -| ([xshift=-4mm]ctl.south);
+  \draw[arr] ([xshift=4mm]ctl.south) -- node[right, font=\scriptsize] {$k_i$} ([xshift=4mm]ctl.south |- pl.north);
+  \draw[arr] (sch) -- (pl);
+  \draw[arr] (lin) -- node[below=2pt, font=\scriptsize] {phản hồi} (pl);
+  \draw[arr] (sch) -- node[left, font=\scriptsize] {$K$ của bước} (tgt);
+\end{tikzpicture}
+\caption{Kiến trúc bốn tầng của hệ thống FlexSDS}
+\label{fig:kien-truc}
+\end{figure}
+
+Ranh giới giữa các tầng được chọn để mỗi thành phần có thể phát triển và kiểm thử độc lập. Tầng điều khiển không nhập bất kỳ mô-đun nào của vLLM, nên mọi quy tắc quyết định được kiểm thử đơn vị trên CPU. Tầng tích hợp chỉ chuyển tín hiệu từ vLLM sang tầng điều khiển và áp quyết định ngược lại, nên khi nâng cấp vLLM chỉ tầng này cần sửa. Giao diện giữa hệ thống và ứng dụng là HTTP tương thích OpenAI, nên chế độ phục vụ (thường, cố định, thích ứng) được chọn lúc khởi động máy chủ và không xuất hiện trong nội dung yêu cầu; nhờ vậy cùng một ứng dụng chạy được trên mọi chế độ mà không sửa mã.
+
+%=====================================================================
+\section{Thiết kế hồ sơ chi phí phần cứng}
+\label{sec:ho-so}
+
+\subsection{Định nghĩa đại lượng đo}
+
+Hồ sơ chi phí là bảng $C(k, B)$ cho $k \in \{0, 1, 2, 3, 4\}$ và $B \in \{1, 2, 4, 8, 16, 32\}$ ở độ dài ngữ cảnh 1024 token. Mỗi giá trị là thời gian một bước gồm một lượt truyền xuôi của mô hình đích và lượt đề xuất $k$ token nháp của bộ nháp, đo ở chế độ eager trong tiến trình worker của vLLM, đồng bộ GPU trước khi đọc đồng hồ. Với $k=0$, giá trị đo bao gồm cả lượt truyền xuôi mà bộ nháp EAGLE vẫn phải chạy để giữ KV cache của nó đồng bộ với mô hình đích; do đó $k=0$ trong chế độ có bộ nháp không tương đương với giải mã thường. Đại lượng đo không bao gồm phần tính logit và lấy mẫu của mô hình đích cũng như chi phí của bộ lập lịch, nên nó là chi phí thành phần, không phải độ trễ đầu--cuối. Mỗi ô được đo với 5 lượt khởi động và 50 lượt đo; giá trị lưu là trung vị của 50 lượt đo.
+
+\subsection{Hồ sơ đo trên GPU A10G}
+
+Bảng~\ref{tab:ho-so-a10g} trình bày hồ sơ chi phí đo trên GPU A10G (dòng sm\_86) của Modal ngày 14/11/2026 cho cặp mô hình đích Qwen2.5-7B-Instruct-AWQ và đầu nháp EAGLE-3.1 của nhóm. Đây là hồ sơ đầy đủ duy nhất hiện qua được bước kiểm tra hợp lệ của hệ thống.
+
+\begin{table}[htbp]
+\centering
+\caption{Hồ sơ chi phí $C(k,B)$ đo trên GPU A10G (ms, trung vị 50 lượt; ngữ cảnh 1024 token)}
+\label{tab:ho-so-a10g}
+\small
+\begin{tabular}{@{}crrrrrr@{}}
+\toprule
+ & \multicolumn{6}{c}{\textbf{Kích thước batch $B$}} \\
+\cmidrule(l){2-7}
+\textbf{$k$} & \textbf{1} & \textbf{2} & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32} \\
+\midrule
+0 & 17,43 & 17,91 & 18,32 & 18,24 & 18,23 & 18,72 \\
+1 & 15,20 & 15,34 & 15,39 & 18,56 & 25,25 & 43,46 \\
+2 & 17,69 & 17,72 & 17,82 & 21,76 & 29,99 & 55,79 \\
+3 & 18,47 & 18,14 & 19,05 & 23,24 & 35,28 & 68,06 \\
+4 & 19,69 & 20,09 & 21,08 & 28,09 & 45,44 & 71,30 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+{\footnotesize Nguồn: \texttt{src/flexsds/profiles/profile\_sm\_86\_remote\_a10g\_fcda5486b12d.json} (nhánh \texttt{develop}).}
+\end{table}
+
+Bảng~\ref{tab:ho-so-a10g} cho thấy hai đặc điểm định hướng thiết kế bộ điều khiển. Thứ nhất, ở batch nhỏ ($B \le 4$), chi phí gần như không đổi theo $k$: một bước với $k=4$ chỉ tốn hơn bước $k=1$ khoảng 30\%, phù hợp với nhận định về chế độ bị giới hạn bởi băng thông ở Mục~\ref{subsec:bang-thong}. Ở batch lớn, chi phí tăng mạnh theo $k$: tại $B=32$, bước $k=4$ tốn $71{,}30$~ms so với $18{,}72$~ms của $k=0$, tức gần gấp bốn lần. Một cấu hình $K$ cố định vì vậy không thể tối ưu cho mọi mức tải. Thứ hai, hồ sơ \emph{không đơn điệu} theo $k$: ở $B \le 4$, $C(0, B)$ lớn hơn $C(1, B)$. Nguyên nhân chưa được xác lập; có thể đến từ đường thực thi khác nhau của bộ nháp khi không sinh token. Vì vậy công thức~\eqref{eq:s-hat} chuẩn hoá theo $C_{\text{ref}}(B) = \min_j C(j, B)$ thay vì theo $C(0, B)$, để mọi lựa chọn được so trên cùng một mốc, và hệ thống ghi cảnh báo khi phát hiện hồ sơ không đơn điệu.
+
+\subsection{Kiểm tra hợp lệ và tra cứu}
+
+Hồ sơ được lưu dưới dạng JSON gồm siêu dữ liệu (lược đồ, trạng thái đo, tên GPU, kiến trúc, phiên bản vLLM, revision của mô hình), bảng chi phí và toàn bộ bản ghi thô kèm mã băm SHA-256. Trước khi bật chế độ thích ứng, hệ thống kiểm tra hồ sơ có trạng thái ``đã đo'', đúng lược đồ, khớp GPU, khớp cặp mô hình và mã băm của bản ghi thô khớp với giá trị khai báo; các hồ sơ tổng hợp từ công thức hoặc thiếu bằng chứng bị từ chối. Khi tra cứu $C(k, B)$ cho một kích thước batch không có trong lưới, hệ thống dùng giá trị của batch đo gần nhất với cùng $k$ và không bao giờ nội suy hay tự tạo giá trị cho một $k$ chưa đo.
+
+%=====================================================================
+\section{Thiết kế bộ điều khiển ngân sách nháp}
+\label{sec:bo-dieu-khien}
+
+Mỗi yêu cầu đang ở pha decode có một thể hiện \texttt{AdaptiveDraftController} riêng, vì tỉ lệ chấp nhận phụ thuộc vào nội dung của từng yêu cầu. Bộ điều khiển gồm một bộ ước lượng tỉ lệ chấp nhận và ba lớp quy tắc được xét theo thứ tự ưu tiên.
+
+\subsection{Ước lượng tỉ lệ chấp nhận}
+
+Sau mỗi lượt xác thực của yêu cầu, bộ điều khiển nhận số token nháp $d_t$ và số token được chấp nhận $a_t$, tính mẫu $x_t = a_t / d_t$ (bỏ qua bước không có token nháp) và cập nhật trung bình trượt hàm mũ
+\begin{equation}\label{eq:ema}
+  \bar{\alpha}_t = \beta\, \bar{\alpha}_{t-1} + (1-\beta)\, x_t, \qquad \bar{\alpha}_0 = \alpha_{\text{init}},
+\end{equation}
+với $\beta = 0{,}8$ và $\alpha_{\text{init}} = 0{,}8$. Vì giá trị khởi tạo ảnh hưởng mạnh ở các bước đầu, ước lượng được hiệu chỉnh độ lệch:
+\begin{equation}\label{eq:ema-hieu-chinh}
+  \hat{\alpha}_t = \operatorname{clip}_{[0,1]}\!\left(\frac{\bar{\alpha}_t - \alpha_{\text{init}}\,\beta^{t}}{1-\beta^{t}}\right).
+\end{equation}
+Nhờ hiệu chỉnh này, một yêu cầu có tỉ lệ chấp nhận thấp được phát hiện sau vài bước thay vì phải chờ giá trị khởi tạo phân rã.
+
+\subsection{Lớp 1: bảo vệ bộ nhớ}
+
+Lớp bảo vệ bộ nhớ có ưu tiên cao nhất. Ở mỗi bước, nếu mức sử dụng KV cache vượt $90\%$ hoặc VRAM trống dưới $1500$~MB, bộ điều khiển ép $k = 0$ và chuyển sang trạng thái \textit{áp lực bộ nhớ}. Trạng thái này giữ $k=0$ tối thiểu 3 bước liên tiếp, và chỉ được giải phóng khi KV cache đã giảm xuống dưới $80\%$. Khoảng trễ giữa ngưỡng kích hoạt và ngưỡng phục hồi (\textit{hysteresis}) tránh hiện tượng bật tắt liên tục khi mức sử dụng dao động quanh một ngưỡng. Hình~\ref{fig:may-trang-thai} mô tả máy trạng thái của lớp này.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize, >={Stealth},
+  st/.style={draw, rounded corners=3pt, minimum width=30mm, minimum height=10mm, align=center, fill=white},
+]
+  \node[st, fill=green!10] (n) at (0,0) {Bình thường\\(lớp 2 quyết định $k$)};
+  \node[st, fill=red!10] (c) at (6,0) {Áp lực bộ nhớ\\$k = 0$};
+  \draw[->, thick] (n) to[bend left=18] node[above, align=center] {KV $> 90\%$ hoặc\\VRAM trống $< 1500$ MB} (c);
+  \draw[->, thick] (c) to[bend left=18] node[below, align=center] {đã giữ $\ge 3$ bước\\và KV $< 80\%$} (n);
+  \draw[->, thick] (c.north east) .. controls +(1.2,1.0) and +(1.2,-1.0) .. node[right, align=left] {còn lại:\\giữ $k=0$;\\chạm ngưỡng lại:\\đếm lại từ đầu} (c.south east);
+\end{tikzpicture}
+\caption{Máy trạng thái của lớp bảo vệ bộ nhớ}
+\label{fig:may-trang-thai}
+\end{figure}
+
+\subsection{Lớp 2: chọn ngân sách theo chi phí đo}
+
+Khi có hồ sơ chi phí hợp lệ, bộ điều khiển giải bài toán~\eqref{eq:bai-toan} bằng cách duyệt các ứng viên $k > 0$, tính $\hat{S}(k)$ theo~\eqref{eq:s-hat} với $\hat{\alpha}$ của yêu cầu và $B$ của bước hiện tại, rồi chọn $k$ có $\hat{S}$ lớn nhất trong số các ứng viên đạt $\hat{S}(k) \ge s_{\min} = 1{,}05$. Nếu không ứng viên nào đạt, bộ điều khiển chọn $k=0$. Thuật toán~\ref{alg:chon-k} tóm tắt quy trình.
+
+Lựa chọn $k=0$ tạo ra một vấn đề: khi không sinh token nháp thì không có phản hồi xác thực, nên $\hat{\alpha}$ không được cập nhật và bộ điều khiển có thể bị kẹt vĩnh viễn ở $k=0$ dù nội dung đã trở nên dễ đoán. Để tránh tình trạng này, sau mỗi 20 bước liên tiếp ở $k=0$ do lớp 2 quyết định, bộ điều khiển thực hiện một bước \textit{thăm dò} với $k=2$ để thu mẫu mới. Giá trị 20 bước được chọn sau thử nghiệm sơ bộ trên T4: với chu kỳ 5 bước, khoảng một phần ba số bước của workload văn bản tự do bị ép nháp vô ích; với 20 bước, tỉ lệ thăm dò giảm xuống dưới 5\% mà vẫn giữ khả năng tự phục hồi.
+
+Ngoài lựa chọn $k$, bộ điều khiển còn tính \textit{ngưỡng hoà vốn} $\alpha^\ast(k)$, là nghiệm của $\mathbb{E}[\tau(k, \alpha)] = s_{\min}\, C(k,B)/C_{\text{ref}}(B)$ trên đoạn $[0,1]$, giải bằng phương pháp chia đôi. Giá trị này không tham gia quyết định nhưng được ghi vào telemetry, cho biết tỉ lệ chấp nhận tối thiểu để lựa chọn hiện tại có lợi; nó giúp giải thích các quyết định khi phân tích kết quả.
+
+\begin{algorithm}[htbp]
+\caption{Chọn ngân sách nháp cho một yêu cầu tại một bước lập lịch}
+\label{alg:chon-k}
+\begin{algorithmic}[1]
+\Require $\hat{\alpha}$ theo~\eqref{eq:ema-hieu-chinh}, kích thước batch $B$, mức dùng KV cache $u$, VRAM trống $m$, hồ sơ $C$
+\Ensure Ngân sách $k$ và lý do
+\If{lớp bảo vệ bộ nhớ đang hoạt động hoặc $u > 90\%$ hoặc $m < 1500$ MB}
+  \State \Return $0$, ``áp lực bộ nhớ'' \Comment{lớp 1}
+\EndIf
+\If{có hồ sơ chi phí hợp lệ} \Comment{lớp 2}
+  \State $C_{\text{ref}} \gets \min_{j} C(j, B)$
+  \State $k^\ast \gets 0$;\quad $S^\ast \gets 1$
+  \For{$k \in \mathcal{K}\setminus\{0\}$}
+    \State $\hat{S} \gets \bigl(1 + \sum_{i=1}^{k}\hat{\alpha}^{i}\bigr) \cdot C_{\text{ref}} / C(k,B)$
+    \If{$\hat{S} \ge s_{\min}$ \textbf{and} $\hat{S} > S^\ast$} \State $k^\ast \gets k$;\quad $S^\ast \gets \hat{S}$ \EndIf
+  \EndFor
+  \If{$k^\ast > 0$} \State $n_0 \gets 0$; \Return $k^\ast$, ``theo chi phí'' \EndIf
+  \State $n_0 \gets n_0 + 1$
+  \If{$n_0 \ge 20$} \State $n_0 \gets 0$; \Return $2$, ``thăm dò'' \EndIf
+  \State \Return $0$, ``không có $k$ nào đạt $s_{\min}$''
+\EndIf
+\State \Return quyết định của lớp 3 (quy tắc ngưỡng) \Comment{chỉ khi không có hồ sơ}
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Lớp 3: quy tắc ngưỡng}
+
+Lớp 3 là quy tắc của phiên bản bộ điều khiển đầu tiên (Adaptive v0), chỉ được dùng khi không có hồ sơ chi phí, chẳng hạn ở làn đối chứng \texttt{adaptive} dùng mô hình nháp 0,5B trong các chiến dịch M2 và M3-05. Quy tắc chọn $k=4$ khi $\hat{\alpha} \ge 0{,}90$, $k=3$ khi $0{,}80 \le \hat{\alpha} < 0{,}90$, $k=2$ khi $0{,}65 \le \hat{\alpha} < 0{,}80$, và $k=0$ khi $\hat{\alpha} < 0{,}65$, kèm cơ chế thăm dò như ở lớp 2. Quy tắc này không dùng thông tin phần cứng và không phụ thuộc kích thước batch; kết quả đo ở Chương~\ref{chap:thu-nghiem} cho thấy hạn chế của nó và là động lực để thiết kế lớp 2.
+
+\subsection{Hạn chế đã nhận diện của mô hình ước lượng}
+
+Công thức $\mathbb{E}[\tau(k,\alpha)] = 1+\sum_{i=1}^{k}\alpha^{i}$ giả định $\alpha$ là xác suất chấp nhận của từng vị trí với điều kiện các vị trí trước đã được chấp nhận. Trong khi đó, đại lượng mà bộ điều khiển quan sát được là tỉ lệ $a_t/d_t$ trên toàn chuỗi nháp, vốn nhỏ hơn xác suất từng vị trí khi $k>1$ (Mục~\ref{sec:chi-so}). Do đó $\hat{S}(k)$ có xu hướng bị đánh giá thấp, và bộ điều khiển có thể chọn $k$ nhỏ hơn mức tối ưu hoặc tắt suy đoán sớm hơn cần thiết. Nhóm ghi nhận điểm này như một giả thuyết cần kiểm chứng bằng telemetry; việc hiệu chỉnh $\alpha$ trước khi đưa vào mô hình là một hướng cải tiến (xem Kết luận).
+
+%=====================================================================
+\section{Tích hợp vào bộ lập lịch của vLLM}
+\label{sec:tich-hop}
+
+\subsection{Ràng buộc của vLLM 0.30.0 và quyết định dùng ngân sách vô hướng}
+
+Thiết kế ban đầu của đồ án nhắm tới điều chỉnh cấu trúc cây nháp theo hướng EAGLE-2. Khi tích hợp, nhóm xác định rằng cơ chế giải mã suy đoán động của vLLM 0.30.0 chỉ nhận một đại lượng vô hướng: số token nháp $K$ cho cả batch, có thể khai báo theo khoảng kích thước batch qua tham số \texttt{num\_speculative\_tokens\_per\_batch\_size}. Engine không có giao diện để truyền danh sách quan hệ cha--con, mặt nạ chú ý cây hay vị trí của các nút. Nếu bộ điều khiển chọn một cây $N$ nút, engine chỉ có thể nhận $N$ như độ dài của một chuỗi tuyến tính, tức hai cây khác nhau có cùng số nút sẽ bị thực thi giống hệt nhau. Để không trình bày một thứ engine không thực thi, nhóm quyết định chuẩn hoá đường phục vụ về \emph{ngân sách vô hướng} $k \in \{0,\dots,4\}$ và hoãn hướng điều khiển cấu trúc cây sang công việc tương lai.
+
+\subsection{Từ quyết định theo yêu cầu đến quyết định theo batch}
+
+Vì vLLM áp một giá trị $K$ cho cả lượt đề xuất của batch, \texttt{AdaptiveBudgetPlanner} gộp các quyết định riêng $k_i$ của từng yêu cầu thành $K = \max_i k_i$ và ghi vào bảng tra cứu giải mã suy đoán động của engine cho bước hiện tại. Sau khi lập lịch, bộ lập lịch cắt số vị trí giữ chỗ cho token nháp (\textit{placeholder}) của từng yêu cầu về đúng $k_i$ của nó; vLLM sau đó cắt các token nháp thật theo độ dài giữ chỗ, nên mỗi yêu cầu chỉ được xác thực đúng số token nháp mà bộ điều khiển của nó đã chọn. Cách làm này cho phép các yêu cầu trong cùng batch có ngân sách khác nhau mà không cần sửa mã nguồn của vLLM.
+
+\subsection{Lập lịch bất đồng bộ và quy phản hồi}
+
+vLLM 0.30.0 hỗ trợ lập lịch bất đồng bộ, trong đó bước lập lịch tiếp theo được chuẩn bị trong khi GPU còn đang thực thi bước hiện tại. Hệ quả là token nháp được đề xuất ở một bước sẽ được xác thực ở một bước lập lịch sau đó. Nếu bộ điều khiển gán kết quả xác thực cho quyết định gần nhất, nó sẽ học sai: kết quả của chuỗi nháp $k=4$ có thể bị tính cho một quyết định $k=2$ đến sau. Để quy phản hồi đúng, hệ thống dùng một sổ ghi nguồn gốc (\textit{lineage ledger}): \texttt{LineageUniProcExecutor} quan sát, ở phía bộ thực thi, hàng dữ liệu nháp nào được sao chép vào lượt xác thực nào, và \texttt{AdaptiveBudgetPlanner} chỉ đưa phản hồi về bộ điều khiển khi xác định được chính xác quyết định đã sinh ra chuỗi nháp đó. Bộ thực thi này không đọc thêm tensor và không thêm điểm đồng bộ GPU, và chỉ được bật khi mã băm các tệp nguồn liên quan của vLLM khớp với phiên bản đã kiểm tra. Hình~\ref{fig:tuan-tu} minh hoạ trình tự xử lý trong một bước.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\footnotesize, >={Stealth}]
+  \def\H{8.6}
+  \foreach \x/\n/\t in {0/s/AsyncScheduler\\(tuỳ biến), 3.3/p/BudgetPlanner, 6.3/c/Controller\\(mỗi yêu cầu), 9.3/w/Worker vLLM\\+ Lineage executor, 12.3/g/GPU} {
+    \node[draw, fill=gray!10, align=center, minimum width=24mm, minimum height=9mm] (\n) at (\x,0) {\t};
+    \draw[dashed, gray] (\x,-0.45) -- (\x,-\H);
+  }
+  \draw[->] (0,-1.1) -- node[above] {tín hiệu: $B$, KV, VRAM} (3.3,-1.1);
+  \draw[->] (3.3,-1.7) -- node[above] {chọn $k_i$} (6.3,-1.7);
+  \draw[->] (6.3,-2.3) -- node[above] {$k_i$, lý do, $\alpha^\ast$} (3.3,-2.3);
+  \draw[->] (3.3,-2.9) -- node[above] {$K=\max_i k_i$} (0,-2.9);
+  \draw[->] (0,-3.5) -- node[above] {lịch + giữ chỗ cắt theo $k_i$} (9.3,-3.5);
+  \draw[->] (9.3,-4.1) -- node[above] {xác thực nháp cũ + đề xuất $K$ nháp mới} (12.3,-4.1);
+  \draw[->] (12.3,-4.7) -- node[above] {kết quả} (9.3,-4.7);
+  \draw[->] (9.3,-5.3) -- node[above] {nháp nào thuộc quyết định nào} (3.3,-5.3);
+  \draw[->] (0,-5.9) -- node[above] {số nháp, số chấp nhận theo yêu cầu} (3.3,-5.9);
+  \draw[->] (3.3,-6.5) -- node[above] {phản hồi đã quy đúng nguồn} (6.3,-6.5);
+  \node[draw, fill=yellow!15, align=left, anchor=west] at (6.6,-7.5) {cập nhật $\hat\alpha$ theo~\eqref{eq:ema-hieu-chinh};\\ghi telemetry bước (JSONL)};
+\end{tikzpicture}
+\caption{Trình tự xử lý trong một bước lập lịch của chế độ thích ứng}
+\label{fig:tuan-tu}
+\end{figure}
+
+%=====================================================================
+\section{Thiết kế các làn đối chứng}
+\label{sec:lan-doi-chung}
+
+Để trả lời các câu hỏi nghiên cứu, hệ thống được thiết kế để chạy nhiều \textit{làn} phục vụ, mỗi làn là một cấu hình máy chủ cố định cho cùng mô hình đích Qwen2.5-7B-Instruct-AWQ. Bảng~\ref{tab:lan} liệt kê các làn được dùng trong các chiến dịch đo. Tên làn được giữ nguyên qua các chiến dịch để số liệu có thể đối chiếu; làn \texttt{adaptive} lịch sử dùng mô hình nháp 0,5B và quy tắc ngưỡng, khác với chế độ thích ứng hiện hành của sản phẩm là \texttt{eagle\_adaptive}.
+
+\begin{table}[htbp]
+\centering
+\caption{Các làn phục vụ dùng trong thực nghiệm}
+\label{tab:lan}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{33mm}>{\raggedright\arraybackslash}p{30mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Làn} & \textbf{Bộ nháp} & \textbf{Ngân sách nháp} \\
+\midrule
+\texttt{vanilla} & Không & Giải mã tự hồi quy; mốc của mọi hệ số tăng tốc \\
+\texttt{static} & Qwen2.5-0.5B-Instruct & $K=3$ cố định \\
+\texttt{adaptive} (v0) & Qwen2.5-0.5B-Instruct & Quy tắc ngưỡng (lớp 3), trần $K=4$ \\
+\texttt{eagle} & EAGLE-3.1 của nhóm & $K=3$ cố định \\
+\texttt{eagle\_adaptive} & EAGLE-3.1 của nhóm & Theo chi phí đo (lớp 2), trần $K=4$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+So sánh giữa các làn chỉ có ý nghĩa khi khác biệt duy nhất là chính sách chọn ngân sách. Chế độ thích ứng yêu cầu một số thiết lập thực thi riêng: chạy eager (không dùng CUDA graph và không biên dịch đồ thị), bật lập lịch bất đồng bộ và dùng bộ thực thi quy phản hồi. Các làn cố định mặc định lại dùng CUDA graph, vốn nhanh hơn chế độ eager. Nếu so trực tiếp, chênh lệch đo được sẽ lẫn hiệu ứng của chế độ thực thi với hiệu ứng của thuật toán. Vì vậy hệ thống cung cấp một \textit{hợp đồng thực thi tương đồng} (\textit{matched execution contract}): khi bật, làn \texttt{vanilla} và làn suy đoán $K$ cố định được khởi chạy với cùng các thiết lập thực thi như làn thích ứng. Hợp đồng này đi kèm một tuỳ chọn tắt bộ nhớ đệm tiền tố (\textit{prefix caching}), dùng cho phép kiểm tra lossless để kết quả không bị ảnh hưởng bởi việc dùng lại KV cache giữa các yêu cầu.
+
+%=====================================================================
+\section{Thiết kế ứng dụng đo}
+\label{sec:ung-dung-do}
+
+Theo quyết định thiết kế của nhóm, quy trình xử lý hoá đơn tiếng Việt được dùng làm \emph{dụng cụ đo} chứ không phải miền ứng dụng của đóng góp: engine không chứa logic nghiệp vụ hoá đơn nào và chỉ nhìn thấy các yêu cầu \texttt{/v1/chat/completions} thông thường. Quy trình gồm ba nút trên dữ liệu hoá đơn MC-OCR~\cite{vu2021mcocr}. Nút 1 (\textit{Extractor}) nhận văn bản hoá đơn đã nhận dạng và sinh JSON theo lược đồ \texttt{invoice\_extraction.v1}; đầu ra có cấu trúc lặp lại cao, entropy thấp. Nút 2 (\textit{Text-to-SQL}) nhận câu hỏi tiếng Việt và sinh câu truy vấn SQL chỉ đọc trên cơ sở dữ liệu hoá đơn; đầu ra bị ràng buộc bởi cú pháp SQL, entropy trung bình. Nút 3 (\textit{báo cáo}) viết báo cáo phân tích bằng văn xuôi từ kết quả truy vấn; đầu ra tự do, entropy cao. Ba nút tạo ra ba chế độ khó đoán khác nhau trong cùng một quy trình, tương ứng ba workload W1, W2, W3 của bộ đo, và khi nối lại thành workload W4 cho phép đo độ trễ cộng dồn.
+
+Bộ đo (\textit{benchmark harness}) được thiết kế theo ba nguyên tắc. Một là đóng băng workload: mỗi workload là một gói yêu cầu cố định có mã băm, dùng chung cho mọi làn. Hai là khởi động khớp tải: trước mỗi ô đo, bộ đo gửi một đợt yêu cầu khởi động có số lượng bằng $\max(3, c)$ với $c$ là mức đồng thời, và loại bỏ kết quả của đợt này. Ba là lặp lại và dùng trung vị: mỗi ô (làn, workload, mức đồng thời) được đo nhiều lần độc lập và báo cáo trung vị, kèm cờ cảnh báo khi khoảng biến thiên của TPOT vượt $15\%$ trung vị. Khi máy chủ chạy trên đám mây, bộ đo được đặt cùng vùng với máy chủ và thông tin môi trường do chính máy chủ ghi lại, để độ trễ mạng và phần cứng của máy đo không lẫn vào kết quả. Chi tiết hiện thực của quy trình và bộ đo được trình bày ở Chương~\ref{chap:trien-khai}.
+
+%=====================================================================
+\section{Các quyết định thiết kế chính}
+\label{sec:quyet-dinh}
+
+Bảng~\ref{tab:quyet-dinh} tổng hợp các quyết định thiết kế có ảnh hưởng lớn tới hệ thống cùng lý do của chúng. Các quyết định được ghi đầy đủ trong nhật ký quyết định của dự án.
+
+\begin{table}[htbp]
+\centering
+\caption{Các quyết định thiết kế chính}
+\label{tab:quyet-dinh}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{40mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Quyết định} & \textbf{Lý do} \\
+\midrule
+Chọn giải mã suy đoán làm hướng tối ưu chính & Giữ nguyên phân phối đầu ra, tác động trực tiếp lên pha decode của các tác vụ đầu ra dài. \\
+Đưa chi phí đo trên GPU vào quyết định thay vì chỉ dùng độ tự tin của bộ nháp & Định hình cây theo độ tự tin đã được EAGLE-2 và TALON khai thác; phần chưa được giải quyết là sự phụ thuộc vào phần cứng và tải. \\
+Mô hình đích Qwen2.5-7B-Instruct lượng tử hoá AWQ 4-bit & Vừa bộ nhớ của GPU phổ thông và để lại chỗ cho KV cache khi quét tới 32 yêu cầu đồng thời; đồng thời tạo đúng chế độ khó cho giải mã suy đoán vì mô hình đích chạy nhanh hơn. \\
+Ngân sách vô hướng $k\in\{0,\dots,4\}$ thay vì điều khiển cấu trúc cây & vLLM 0.30.0 chỉ thực thi chuỗi nháp tuyến tính; tránh trình bày một cấu trúc cây mà engine không thực thi. \\
+Huấn luyện đầu nháp EAGLE-3.1 cho mô hình đích & Không có checkpoint EAGLE dùng được cho cặp mô hình đích đã chọn trên vLLM; quyết định ban đầu không tự huấn luyện được điều chỉnh thành một luồng việc song song ngoài đường găng. \\
+Dùng quy trình hoá đơn làm dụng cụ đo & Cho ba chế độ entropy tương phản và hiệu ứng độ trễ cộng dồn trong cùng một quy trình thật. \\
+Phục vụ qua giao diện OpenAI & Mọi nền tảng điều phối dùng được ngay; chế độ phục vụ không lộ ra trong yêu cầu. \\
+Từ chối chế độ thích ứng khi hồ sơ không hợp lệ & Không ra quyết định dựa trên chi phí giả định. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Kết chương}
+
+Chương này đã phát biểu bài toán chọn ngân sách nháp thành bài toán tối ưu có ràng buộc~\eqref{eq:bai-toan}, trong đó tốc độ kỳ vọng được ước lượng từ tỉ lệ chấp nhận quan sát được và hồ sơ chi phí đo trên GPU. Hệ thống FlexSDS được thiết kế theo bốn tầng, với bộ điều khiển ba lớp (bảo vệ bộ nhớ, chọn theo chi phí, quy tắc ngưỡng dự phòng) tách biệt khỏi vLLM, và tầng tích hợp gộp quyết định theo yêu cầu thành quyết định theo batch, cắt giữ chỗ theo từng yêu cầu và quy phản hồi đúng nguồn trong lập lịch bất đồng bộ. Chương~\ref{chap:trien-khai} trình bày hiện thực của các thiết kế này.

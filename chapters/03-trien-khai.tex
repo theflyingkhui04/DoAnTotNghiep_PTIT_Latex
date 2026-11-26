@@ -1,0 +1,219 @@
+\chapter{Triển khai và hiện thực hệ thống}
+\label{chap:trien-khai}
+
+Chương này trình bày cách các thiết kế ở Chương~\ref{chap:thiet-ke} được hiện thực. Mục~\ref{sec:moi-truong} mô tả môi trường và công nghệ. Mục~\ref{sec:cau-truc-ma} giới thiệu cấu trúc mã nguồn. Mục~\ref{sec:huan-luyen} trình bày việc huấn luyện đầu nháp EAGLE-3.1 cho mô hình đích. Các mục từ~\ref{sec:ht-dieu-khien} đến~\ref{sec:ht-cli} trình bày hiện thực tầng điều khiển, tầng tích hợp vLLM và công cụ dòng lệnh. Mục~\ref{sec:ht-pipeline} và Mục~\ref{sec:ht-bo-do} trình bày quy trình hoá đơn và bộ đo. Mục~\ref{sec:ht-web} trình bày giao diện web minh hoạ, và Mục~\ref{sec:kiem-thu} tổng kết công tác kiểm thử.
+
+Trừ khi ghi chú khác, mọi đường dẫn mã nguồn trong chương này tính từ gốc kho mã của đồ án trên nhánh \texttt{develop} tại commit \texttt{229b3e4} (ngày 23/11/2026).
+
+%=====================================================================
+\section{Môi trường và công nghệ}
+\label{sec:moi-truong}
+
+Bảng~\ref{tab:cong-nghe} liệt kê các thành phần phần mềm chính. Phiên bản vLLM được ghim cứng ở 0.30.0 vì bộ lập lịch tuỳ biến kế thừa lớp nội bộ của phiên bản này; PyTorch 2.13.0 và CUDA 13.0 là các phiên bản đi kèm của bản dựng vLLM đó, được ghi lại trong hồ sơ chi phí và trong hợp đồng môi trường của bộ đo.
+
+\begin{table}[htbp]
+\centering
+\caption{Các thành phần phần mềm chính của hệ thống}
+\label{tab:cong-nghe}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{36mm}>{\raggedright\arraybackslash}p{28mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Thành phần} & \textbf{Phiên bản} & \textbf{Vai trò} \\
+\midrule
+vLLM & 0.30.0 & Engine phục vụ, khung giải mã suy đoán, giao diện OpenAI \\
+PyTorch / CUDA & 2.13.0 / 13.0 & Nền tính toán GPU của vLLM \\
+Python & 3.11 & Ngôn ngữ chính của engine, CLI, pipeline và bộ đo \\
+Modal & -- & Nền tảng GPU đám mây không máy chủ cho phục vụ, đo hồ sơ và huấn luyện \\
+SpecForge & 0.2.0 & Khung huấn luyện đầu nháp EAGLE-3 \\
+FastAPI, Next.js & --, 16.4.6 & Backend và giao diện của web console minh hoạ \\
+PostgreSQL (Supabase), SQLite & -- & Cơ sở dữ liệu hoá đơn cho web console và cho bộ đo \\
+pytest, Vitest & -- & Kiểm thử tự động cho Python và giao diện \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Về phần cứng, đồ án sử dụng bốn loại GPU cho các mục đích khác nhau. NVIDIA T4 16~GB (kiến trúc Turing, sm\_75, băng thông $320$~GB/s~\cite{nvidia-t4}) trên Colab/Kaggle được dùng ở các mốc thực nghiệm đầu. NVIDIA L4 24~GB (Ada Lovelace, sm\_89, $300$~GB/s~\cite{nvidia-l4}) được dùng cho chiến dịch đo bốn làn. NVIDIA A10G 24~GB trên Modal (dòng Ampere, sm\_86; bản A10 có băng thông $600$~GB/s~\cite{nvidia-a10}) được dùng để đo hồ sơ chi phí, phục vụ sản phẩm và chạy web console. Một GPU A100 80~GB thuê trên Modal được dùng một lần để huấn luyện đầu nháp. Việc dùng nhiều loại GPU xuất phát từ khả năng cấp phát thực tế của các nền tảng ở từng giai đoạn; số liệu trên các GPU khác nhau được báo cáo riêng và không trộn vào cùng một bảng hệ số tăng tốc (Chương~\ref{chap:thu-nghiem}).
+
+%=====================================================================
+\section{Cấu trúc mã nguồn}
+\label{sec:cau-truc-ma}
+
+Kho mã được tổ chức theo các tầng của kiến trúc. Bảng~\ref{tab:cau-truc-ma} liệt kê các thư mục chính và quy mô của chúng.
+
+\begin{table}[htbp]
+\centering
+\caption{Các thư mục mã nguồn chính (đếm trên nhánh \texttt{develop}, commit \texttt{229b3e4})}
+\label{tab:cau-truc-ma}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{32mm}r>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Thư mục} & \textbf{Số dòng} & \textbf{Nội dung} \\
+\midrule
+\texttt{src/proposer/} & 1\,563 & Bộ điều khiển ngân sách nháp, mô hình chi phí trong bộ điều khiển \\
+\texttt{src/server/} & 1\,385 & Bộ lập lịch tuỳ biến, bộ lập kế hoạch ngân sách, sổ ghi nguồn gốc và bộ thực thi \\
+\texttt{src/flexsds/} & 7\,218 & Công cụ dòng lệnh, đo hồ sơ, kiểm tra tương thích, khởi chạy cục bộ và trên Modal \\
+\texttt{src/pipeline/} & 2\,813 & Ba nút của quy trình hoá đơn, lược đồ dữ liệu, OCR \\
+\texttt{src/api/}, \texttt{web/src/} & 2\,860; 6\,942 & Backend FastAPI và giao diện Next.js của web console \\
+\texttt{experiments/} & 73\,822 & Bộ đo, tổng hợp kết quả, các chiến dịch đo, công cụ kiểm tra lossless \\
+\texttt{tests/} & 31\,677 & 146 tệp kiểm thử tự động \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+%=====================================================================
+\section{Huấn luyện đầu nháp EAGLE-3.1}
+\label{sec:huan-luyen}
+
+Kế hoạch ban đầu của nhóm là dùng một checkpoint EAGLE đã công bố cho mô hình đích. Khi kiểm tra ở giai đoạn đầu, nhóm không tìm được checkpoint EAGLE nào cho Qwen2.5-7B-Instruct chạy được trên vLLM với cấu hình của đồ án. Nhóm vì vậy mở một luồng việc song song, nằm ngoài đường găng của dự án, để tự huấn luyện một đầu nháp theo kiến trúc EAGLE-3 bằng khung SpecForge. Mã huấn luyện nằm ở một kho mã riêng (\texttt{qwen2.5-7b-eagle3.1-speculator}); kho mã của đồ án chỉ lưu nhật ký công việc của nhiệm vụ này.
+
+Đầu nháp có kiến trúc \texttt{LlamaForCausalLMEagle3} gồm một tầng giải mã với kích thước ẩn 3\,584, 28 đầu truy vấn và 4 đầu khoá--giá trị (grouped-query attention), giống cấu hình chú ý của mô hình đích. Đặc trưng được lấy từ các tầng 1, 13 và 24 của mô hình đích, đúng tinh thần kết hợp đặc trưng nhiều tầng của EAGLE-3~\cite{li2025eagle3}. Bộ từ vựng nháp được thu gọn còn 16\,000 token có tần suất cao, ánh xạ sang không gian 152\,064 token của Qwen2.5. Mô hình được huấn luyện ở độ chính xác bfloat16 với AdamW, tốc độ học khởi đầu $10^{-4}$ giảm dần theo hàm cosin, kích thước batch hiệu dụng 8 (micro-batch 2, tích luỹ gradient 4), độ dài chuỗi tối đa 2\,048 token và độ sâu mô phỏng nhiều bước khi huấn luyện bằng 5. Dữ liệu huấn luyện gồm 40\,000 mẫu hội thoại nhiều lượt và 3\,000 mẫu đánh giá \CanBoSung{nguồn và giấy phép của tập dữ liệu hội thoại dùng để huấn luyện}. Quá trình huấn luyện chạy 3 epoch, tương đương 15\,000 bước tối ưu, trên một GPU A100 80~GB, với tốc độ khoảng 1\,020 bước mỗi giờ và mức dùng VRAM khoảng 42,6~GB.
+
+\begin{table}[htbp]
+\centering
+\caption{Diễn biến huấn luyện đầu nháp EAGLE-3.1 trên tập đánh giá 3\,000 mẫu}
+\label{tab:huan-luyen}
+\small
+\begin{tabular}{@{}rccc@{}}
+\toprule
+\textbf{Bước} & \textbf{Loss đánh giá} & \textbf{Độ chính xác top-1 (vị trí 1)} & \textbf{Độ dài chấp nhận mô phỏng} \\
+\midrule
+5\,000 & 3,146 & 58,76\% & 1,209 \\
+7\,000 & 2,854 & 62,10\% & 1,358 \\
+10\,000 & 2,590 & 65,23\% & 1,517 \\
+15\,000 & 2,505 & 66,37\% & 1,579 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+{\footnotesize Nguồn: \texttt{logs/Khoi/M3-04/M3-04\_worklogs.md}; số liệu do khung SpecForge báo cáo.}
+\end{table}
+
+Bảng~\ref{tab:huan-luyen} cho thấy loss giảm đều và độ chính xác dự đoán token kế tiếp tăng qua cả ba epoch. Tại bước 15\,000, độ chính xác top-1 giảm dần theo vị trí nháp, từ 66,37\% ở vị trí 1 xuống 58,94\% ở vị trí 5. Checkpoint cuối được xuất sang định dạng safetensors của Hugging Face (khoảng 1,78~GB) và công bố tại kho \texttt{duckhoi/qwen2.5-7b-eagle3.1-speculator} với nhãn phát hành \texttt{v0.3.0-epoch3}. Đây là bộ nháp của các làn \texttt{eagle} và \texttt{eagle\_adaptive}. Các chỉ số trên là chỉ số huấn luyện trên dữ liệu hội thoại chung; tỉ lệ chấp nhận khi phục vụ các workload hoá đơn của đồ án được đo riêng ở Chương~\ref{chap:thu-nghiem}.
+
+%=====================================================================
+\section{Hiện thực tầng điều khiển}
+\label{sec:ht-dieu-khien}
+
+\textbf{Bộ điều khiển.} Lớp \texttt{AdaptiveDraftController} trong \path{src/proposer/controller.py} hiện thực toàn bộ thiết kế ở Mục~\ref{sec:bo-dieu-khien}. Phương thức \path{update} nhận số token nháp và số token được chấp nhận sau mỗi lượt xác thực và cập nhật trung bình trượt; \path{get_effective_alpha} trả về ước lượng đã hiệu chỉnh độ lệch theo~\eqref{eq:ema-hieu-chinh}. Phương thức \path{select_budget} gọi lần lượt \path{apply_memory_pressure_rule}, \path{apply_cost_driven_budget_rule} (khi có bảng chi phí) hoặc \path{apply_budget_rule} (quy tắc ngưỡng), và trả về một đối tượng \texttt{BudgetDecision} chứa $k$, lý do, $\hat{\alpha}$, $\mathbb{E}[\tau]$, $\hat{S}$, $\alpha^\ast$, các chi phí tra cứu, chính sách đã dùng và cờ hồ sơ không đơn điệu. Mọi tham số (ngưỡng bộ nhớ, chu kỳ thăm dò, $s_{\min}$) đều có giá trị mặc định như ở Chương~\ref{chap:thiet-ke} và được kiểm tra hợp lệ khi khởi tạo; ví dụ $s_{\min}$ phải hữu hạn và không nhỏ hơn 1, và giá trị $\hat{\alpha}$ không hợp lệ (NaN, kiểu logic) được thay bằng 0 thay vì làm hỏng phép so sánh.
+
+\textbf{Mô hình chi phí.} Lớp \texttt{EmpiricalCostProfile} tra $C(k, B)$ theo batch đo gần nhất và báo lỗi nếu $k$ chưa từng được đo, đúng nguyên tắc không tự tạo chi phí. Hàm \texttt{validate\_measured\_profile} trong \texttt{src/flexsds/core/cost\_model.py} kiểm tra lược đồ, trạng thái đo, thiết bị, cặp mô hình và mã băm của bản ghi thô trước khi một hồ sơ được chấp nhận; một hàm chẩn đoán riêng phát hiện các ô làm hồ sơ không đơn điệu để ghi cảnh báo.
+
+\textbf{Đo hồ sơ.} Lệnh \texttt{flexsds profile --benchmark} khởi chạy vLLM với đúng cấu hình phục vụ của chế độ thích ứng (eager, lập lịch bất đồng bộ, tắt bộ nhớ đệm tiền tố), rồi đo từng ô $(k, B)$ trong tiến trình worker: mỗi lần đo đồng bộ GPU trước và sau, lấy thời gian bằng bộ đếm hiệu năng của hệ điều hành. Chế độ \texttt{full} đo 50 lượt sau 5 lượt khởi động cho mỗi ô; chế độ \texttt{fast} đo 5 lượt để thử nhanh. Kết quả được ghi kèm toàn bộ bản ghi thô, phiên bản phần mềm và revision của mô hình vào thư mục \texttt{\textasciitilde/.flexsds/profiles/}; hồ sơ A10G ở Bảng~\ref{tab:ho-so-a10g} được đóng gói sẵn trong gói cài đặt. Lệnh có thể chạy trên GPU cục bộ hoặc trên Modal (\texttt{--backend modal --gpu A10G}).
+
+%=====================================================================
+\section{Hiện thực tầng tích hợp vLLM}
+\label{sec:ht-tich-hop}
+
+\textbf{Bộ lập lịch.} Lớp \texttt{AdaptiveAsyncScheduler} trong \texttt{src/server/adaptive\_scheduler.py} kế thừa \texttt{AsyncScheduler} của vLLM 0.30.0 và được nạp bằng tham số dòng lệnh \texttt{--scheduler-cls}. Lớp này ghi đè bốn điểm. Phương thức \texttt{schedule} đọc kích thước batch, mức dùng KV cache và VRAM trống, gọi bộ lập kế hoạch để chọn $k_i$ và ghi $K=\max_i k_i$ vào bảng tra cứu giải mã suy đoán động cho lượt đề xuất của bước này. Phương thức \texttt{\_update\_after\_schedule} cắt danh sách vị trí giữ chỗ token nháp của từng yêu cầu về $k_i$. Phương thức \texttt{make\_spec\_decoding\_stats} lấy số token nháp và số token được chấp nhận của từng yêu cầu để làm phản hồi. Phương thức \texttt{\_free\_request} giải phóng phiên điều khiển khi yêu cầu kết thúc.
+
+\textbf{Bộ lập kế hoạch.} Lớp \texttt{AdaptiveBudgetPlanner} trong \texttt{src/server/budget\_planner.py} giữ một bộ điều khiển cho mỗi yêu cầu, tạo kế hoạch của bước (\texttt{plan\_step}), ghi nhận ngân sách đã cấp cho từng lượt đề xuất (\texttt{record\_scheduled\_budget}) và chỉ đưa phản hồi về bộ điều khiển (\texttt{record\_verification}) khi sổ ghi nguồn gốc xác định được quyết định tương ứng. Nếu không quy được nguồn, bước đó được ghi là lỗi nguồn gốc và phản hồi bị bỏ qua thay vì gán sai. Module này không nhập vLLM nên toàn bộ được kiểm thử trên CPU. Cấu hình được đọc một lần từ các biến môi trường \texttt{ADAPTIVE\_*} khi máy chủ khởi động.
+
+\textbf{Sổ ghi nguồn gốc và bộ thực thi.} \texttt{src/server/lineage.py} hiện thực sổ ghi \texttt{LineageLedger} lưu nguồn gốc của từng hàng dữ liệu nháp (thuộc yêu cầu nào, được sinh trong lượt thực thi nào, với ngân sách nào), không lưu giá trị token hay tensor GPU. \texttt{LineageUniProcExecutor} trong \texttt{src/server/lineage\_executor.py} mở rộng bộ thực thi một tiến trình của vLLM để quan sát việc sao chép hàng nháp vào lượt xác thực. Trước khi bật, bộ thực thi so mã băm SHA-256 của các tệp nguồn vLLM liên quan với một bảng kê đã kiểm tra (\texttt{experiments/scalar\_vllm\_source\_manifest.json}, \texttt{experiments/m4\_eagle\_source\_manifest.json}); nếu có bất kỳ sai khác nào, máy chủ từ chối khởi động chế độ thích ứng.
+
+\textbf{Telemetry.} Mỗi bước lập lịch được ghi thành một dòng JSONL gồm kích thước batch, $K$ của batch, $k_i$ và lý do của từng yêu cầu, chính sách quyết định, chi phí tra cứu và $\alpha^\ast$; mỗi yêu cầu khi kết thúc được ghi một dòng tổng hợp gồm chuỗi ngân sách theo thời gian, $k$ trung bình, số token nháp và số token được chấp nhận. Đây là bằng chứng để kiểm tra bộ điều khiển có thực sự thay đổi $K$ theo tải và theo nội dung hay không.
+
+\textbf{Khởi chạy máy chủ.} Lớp \texttt{LocalServingRunner} trong \path{src/flexsds/server/local_runner.py} dựng lệnh \texttt{vllm serve} từ cấu hình phục vụ. Ở chế độ thích ứng, lệnh gồm cấu hình giải mã suy đoán (loại bộ nháp, revision, trần $K=4$), \path{--scheduler-cls} trỏ tới bộ lập lịch tuỳ biến, \path{--distributed-executor-backend} trỏ tới bộ thực thi quy phản hồi, \path{--enforce-eager}, \path{--async-scheduling} và chế độ biên dịch tắt. Khi bật hợp đồng thực thi tương đồng, các làn \texttt{vanilla} và $K$ cố định được dựng với cùng các cờ thực thi này, và có thể thêm \path{--no-enable-prefix-caching}.
+
+%=====================================================================
+\section{Công cụ dòng lệnh FlexSDS}
+\label{sec:ht-cli}
+
+Toàn bộ hệ thống được đóng gói thành gói Python \texttt{flexsds} (phiên bản 0.3.4 trong \texttt{pyproject.toml}), cài bằng \texttt{pip} và cung cấp lệnh \texttt{flexsds}. Khi gọi không có tham số, công cụ hiển thị màn hình giới thiệu và một trình hướng dẫn hỏi--đáp từng bước; khi gọi với lệnh con, nó chạy không tương tác để dùng được trong kịch bản tự động. Bảng~\ref{tab:cli} liệt kê các lệnh con chính.
+
+\begin{table}[htbp]
+\centering
+\caption{Các lệnh con chính của công cụ \texttt{flexsds}}
+\label{tab:cli}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{26mm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Lệnh} & \textbf{Chức năng} \\
+\midrule
+\texttt{detect} & Nhận diện GPU, kiến trúc tính toán, VRAM và phiên bản phần mềm \\
+\texttt{inspect} & Xác định loại bộ nháp (mô hình độc lập, EAGLE và phiên bản) từ tệp của mô hình \\
+\texttt{profile} & Nạp hoặc đo hồ sơ chi phí của GPU (cục bộ hoặc trên Modal) \\
+\texttt{serve} & Kiểm tra tương thích và khởi chạy máy chủ ở chế độ thường, $K$ cố định hoặc thích ứng \\
+\texttt{chat}, \texttt{monitor} & Trò chuyện thử với máy chủ; theo dõi telemetry \\
+\texttt{auth}, \texttt{clear} & Quản lý thông tin xác thực Modal, Hugging Face bên ngoài kho mã \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Lệnh \texttt{serve} là luồng chính, được minh hoạ ở Hình~\ref{fig:luong-serve}. Công cụ trước hết đọc cấu hình của mô hình đích và bộ nháp để xác định phương pháp suy đoán và kiểm tra tính tương thích, bao gồm kích thước từ vựng (đầu nháp EAGLE-3.1 dùng từ vựng nháp 16\,000 token ánh xạ sang từ vựng đích). Tiếp theo, nó ước lượng VRAM cần thiết và dừng lại nếu có nguy cơ tràn bộ nhớ, trừ khi người vận hành chủ động cho phép. Ở chế độ thích ứng, nó yêu cầu một hồ sơ chi phí đo thật và hợp lệ cho đúng GPU và cặp mô hình; nếu thiếu, nó đề nghị chạy lệnh đo hồ sơ thay vì tiếp tục. Sau khi khởi chạy cục bộ hoặc triển khai lên Modal, công cụ chỉ báo ``Inference verified'' khi máy chủ đã trả lời \texttt{/health}, liệt kê mô hình ở \texttt{/v1/models} và sinh thành công một câu trả lời thử, vì một địa chỉ URL vừa được tạo chưa chứng minh mô hình đã sẵn sàng.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize, node distance=5mm, >={Stealth},
+  act/.style={draw, rounded corners=6pt, fill=blue!8, minimum width=46mm, minimum height=7mm, align=center},
+  dec/.style={draw, diamond, aspect=2.6, fill=yellow!15, inner sep=1pt, align=center},
+  stop/.style={draw, rounded corners=6pt, fill=red!10, minimum width=30mm, minimum height=7mm, align=center},
+]
+  \node[act] (a1) {Đọc cấu hình mô hình đích và bộ nháp};
+  \node[act, below=of a1] (a2) {Xác định phương pháp suy đoán,\\kiểm tra từ vựng và tokenizer};
+  \node[dec, below=of a2] (d1) {Ước lượng VRAM\\đủ?};
+  \node[dec, below=6mm of d1] (d2) {Chế độ thích ứng:\\hồ sơ hợp lệ?};
+  \node[act, below=6mm of d2] (a3) {Khởi chạy vLLM (cục bộ)\\hoặc triển khai lên Modal};
+  \node[dec, below=6mm of a3] (d3) {/health, /v1/models,\\sinh thử thành công?};
+  \node[act, below=6mm of d3, fill=green!12] (a4) {Báo ``Inference verified''\\và in địa chỉ API};
+  \node[stop, right=14mm of d1] (s1) {Dừng (trừ khi có\\\texttt{--allow-oom-risk})};
+  \node[stop, right=14mm of d2] (s2) {Dừng, đề nghị\\\texttt{flexsds profile}};
+  \node[stop, right=14mm of d3] (s3) {Báo lỗi sẵn sàng};
+  \draw[->] (a1) -- (a2); \draw[->] (a2) -- (d1);
+  \draw[->] (d1) -- node[right] {có} (d2); \draw[->] (d2) -- node[right] {có / không áp dụng} (a3);
+  \draw[->] (a3) -- (d3); \draw[->] (d3) -- node[right] {có} (a4);
+  \draw[->] (d1) -- node[above] {không} (s1);
+  \draw[->] (d2) -- node[above] {không} (s2);
+  \draw[->] (d3) -- node[above] {không} (s3);
+\end{tikzpicture}
+\caption{Luồng xử lý của lệnh \texttt{flexsds serve}}
+\label{fig:luong-serve}
+\end{figure}
+
+Khi triển khai lên Modal, công cụ dựng một ảnh container có vLLM 0.30.0 và mã nguồn của các tầng điều khiển và tích hợp, lưu trọng số mô hình trong ổ đĩa bền của nền tảng theo revision đã ghim, và tạo một endpoint HTTPS. Có hai chế độ: chế độ phát triển giữ máy chủ chạy cùng phiên dòng lệnh, và chế độ triển khai bền (\texttt{--deploy}) giữ endpoint cố định; trong cả hai trường hợp, GPU tự tắt khi không có tải và được cấp lại khi có yêu cầu mới.
+
+%=====================================================================
+\section{Hiện thực quy trình hoá đơn}
+\label{sec:ht-pipeline}
+
+\textbf{Dữ liệu.} Dữ liệu đầu vào là văn bản đã nhận dạng của các hoá đơn bán lẻ tiếng Việt trong bộ dữ liệu MC-OCR~\cite{vu2021mcocr}. Bộ workload W1 dùng 30 hoá đơn của tập phát triển; nhãn gốc của bộ dữ liệu (tên cửa hàng, địa chỉ, thời gian, tổng tiền) chỉ được giữ trong siêu dữ liệu để chấm điểm và không bao giờ được đưa vào nội dung prompt.
+
+\textbf{Nút 1 -- trích xuất.} Nút 1 gửi văn bản hoá đơn tới máy chủ với chỉ dẫn hệ thống cố định và yêu cầu trả về JSON. Đầu ra được kiểm tra theo lược đồ JSON \texttt{invoice\_extraction.v1} (\texttt{src/pipeline/schemas/invoice\_extraction.schema.json}) và mô hình dữ liệu tương ứng trong \texttt{src/pipeline/invoice\_models.py}, gồm thông tin người bán, thời điểm, các dòng hàng, thuế, tổng tiền và bằng chứng trích xuất cho từng trường. Kết quả hợp lệ được nạp vào cơ sở dữ liệu SQLite theo lược đồ \texttt{src/pipeline/sqlite/schema.sql}; phiên bản 2 của lược đồ bổ sung làn \texttt{eagle} và độ trễ của từng hoá đơn.
+
+\textbf{Nút 2 -- Text-to-SQL.} Nút 2 nhận một trong sáu câu hỏi nghiệp vụ cố định và sinh câu SQL. Mọi câu SQL do mô hình sinh phải qua một lớp kiểm tra chỉ đọc: chỉ một câu \texttt{SELECT} hoặc \texttt{WITH}, chỉ truy vấn ba view \texttt{v\_invoice\_facts}, \texttt{v\_item\_facts} và \texttt{v\_tax\_facts}, cấm truy cập bảng gốc và mọi lệnh ghi. Câu hợp lệ được chạy trên một kết nối chỉ đọc với giới hạn 5 giây và 200 dòng. Câu lỗi chỉ được ghi trạng thái và quy trình đi tiếp; mô hình không được gọi lại để sửa, nhờ đó số yêu cầu gửi tới máy chủ bằng nhau giữa các làn.
+
+\textbf{Nút 3 -- báo cáo.} Nút 3 nhận các câu hỏi, câu SQL, trạng thái và tối đa 20 dòng kết quả của từng câu, rồi viết báo cáo phân tích bằng tiếng Việt, chỉ được dùng các con số có trong bảng kết quả. Cả ba nút dùng nhiệt độ 0 và hạt giống ngẫu nhiên cố định. Nút 2 và Nút 3 dùng nguyên văn chỉ dẫn hệ thống đã đóng băng của workload W2 và W3, để đầu ra của quy trình khớp với các workload của bộ đo. Lệnh \texttt{scripts/run\_pipeline\_e2e.py} chạy cả ba nút nối tiếp trên một làn phục vụ và ghi kết quả, độ trễ của từng nút vào thư mục của lần chạy.
+
+%=====================================================================
+\section{Hiện thực bộ đo và tổng hợp kết quả}
+\label{sec:ht-bo-do}
+
+\textbf{Workload đóng băng.} Mỗi workload là một gói gồm tệp yêu cầu, chỉ dẫn hệ thống và bảng kê có mã băm (\texttt{experiments/configs/<workload>/package\_manifest.json}). W1 gồm 30 yêu cầu trích xuất JSON (giới hạn 1\,024 token đầu ra, chế độ JSON), W2 gồm 12 yêu cầu Text-to-SQL (96 token) và W3 gồm 12 yêu cầu phân tích nghiệp vụ dạng văn xuôi. Chiến dịch M1 dùng phiên bản đầu của W2 và W3 (W3 giới hạn 192 token); từ M2 trở đi dùng \texttt{w2\_v2} và \texttt{w3\_v2}, trong đó W3 được nâng giới hạn lên 768 token vì chẩn đoán cho thấy cả 12/12 yêu cầu bị cắt cụt ở 192 token. Các gói không được sửa sau khi đóng băng; mọi thay đổi tạo ra một phiên bản mới.
+
+\textbf{Bộ đo.} \texttt{experiments/benchmark\_harness.py} gửi yêu cầu với mức đồng thời $c \in \{1, 2, 4, 8, 16, 32\}$, mỗi lượt đo 32 yêu cầu, sau một đợt khởi động bị loại khỏi kết quả. Chính sách khởi động mặc định gửi $\max(3, c)$ yêu cầu; chiến dịch M3-05 dùng chính sách cố định 3 yêu cầu (\texttt{m3-fixed3}), được khai báo trong cấu hình chiến dịch. Với mỗi yêu cầu, bộ đo ghi TTFT, độ trễ đầu--cuối, số token và các bộ đếm giải mã suy đoán của engine theo lược đồ telemetry đã đóng băng (\texttt{experiments/configs/m1\_request\_telemetry.schema.json}). Trước khi đo, hàm \texttt{validate\_environment} kiểm tra GPU và phiên bản phần mềm khớp với hợp đồng môi trường của chiến dịch và dừng ngay nếu sai khác. Khi máy chủ chạy trên Modal, bộ đo được chạy trong một hàm của Modal cùng vùng với máy chủ; thông tin môi trường do container máy chủ ghi lúc khởi động, và VRAM được container máy chủ lấy mẫu mỗi 0,25 giây rồi ghép vào từng lượt đo theo cửa sổ thời gian.
+
+\textbf{Tổng hợp.} \texttt{experiments/aggregate\_results.py} tổng hợp mỗi ô (làn, workload, mức đồng thời) từ các lần lặp: TTFT và TPOT lấy trung vị và phân vị 95, thông lượng tính cho từng lần lặp bằng tổng token đầu ra chia thời gian của lần lặp rồi lấy trung vị, $\alpha$ và $\tau$ tính theo~\eqref{eq:alpha-tau}, và hệ số tăng tốc tính theo~\eqref{eq:speedup-do} bằng cách ghép với ô \texttt{vanilla} cùng workload, cùng mức đồng thời. Ô có tỉ số $(\mathrm{TPOT}_{\max} - \mathrm{TPOT}_{\min})/\mathrm{TPOT}_{p50}$ vượt 15\% được gắn cờ biến thiên. Mỗi dòng kết quả mang commit của mã nguồn và mã băm của dữ liệu thô để truy ngược.
+
+\textbf{Kiểm tra lossless.} \texttt{experiments/lossless\_verifier.py} chạy cùng một bộ prompt ở nhiệt độ 0 và mức đồng thời 1 trên làn giải mã thường và làn suy đoán, so sánh chuỗi token ID đầu ra, và ghi lại vị trí bắt đầu khác nhau nếu có. Để phân biệt khác biệt do giải mã suy đoán với dao động tự nhiên của phần cứng, làn giải mã thường được chạy hai lần và so với chính nó.
+
+%=====================================================================
+\section{Web console minh hoạ}
+\label{sec:ht-web}
+
+Để hội đồng và người dùng có thể quan sát trực tiếp hệ thống, nhóm xây dựng một web console so sánh các endpoint phục vụ trên chính quy trình hoá đơn. Console tách thành bốn tầng: giao diện Next.js triển khai trên Vercel (\texttt{web/}); backend FastAPI trên Render (\texttt{src/api/}) điều phối OCR, gọi các endpoint, kiểm tra kết quả và ghi cơ sở dữ liệu; PostgreSQL và kho lưu trữ ảnh trên Supabase; và tầng tính toán trên Modal gồm dịch vụ OCR (tách dòng bằng PaddleOCR, nhận dạng bằng VietOCR) cùng các endpoint vLLM. Console không có endpoint dựng sẵn và không tự bật tắt GPU: người dùng dán địa chỉ API do \texttt{flexsds serve} in ra, chọn một endpoint làm mốc, và mọi kết quả được hiển thị cạnh mốc.
+
+Console có năm trang. Trang Nút 1 nhận ảnh hoá đơn, chạy OCR rồi chạy Nút 1 song song trên các endpoint đã chọn, hiển thị bảng so sánh từng trường với mốc và hệ số tốc độ theo TPOT. Trang Nút 2 chuyển câu hỏi tiếng Việt thành SQL, kiểm tra SQL bằng thư viện \texttt{sqlglot} (chỉ đọc, chỉ trên các view cho phép) và chạy bằng một vai trò cơ sở dữ liệu chỉ đọc; câu trả lời được hiển thị nguyên văn kèm cờ cảnh báo khi có con số không xuất hiện trong kết quả truy vấn. Trang Nút 3 lấy số liệu bằng các truy vấn cố định, để mô hình chọn biểu đồ và viết báo cáo, rồi đối chiếu mọi con số trong báo cáo với bảng số liệu. Trang ``Đo và so sánh'' chạy các gói workload đóng băng trên nhiều endpoint và hiển thị lại số chính thức của chiến dịch đo để người xem phân biệt số đo trực tiếp (có nhiễu) với số chính thức. Trang Endpoint quản lý danh sách endpoint, chặn địa chỉ mạng nội bộ, và phân biệt trạng thái ``đang khởi động GPU'' (HTTP 503 khi Modal đang cấp GPU) với trạng thái ``đã dừng''.
+
+Về bảo mật, mọi API trừ trang trạng thái yêu cầu khoá truy cập, có giới hạn tần suất theo địa chỉ IP, CORS chỉ cho phép các tên miền khai báo, ảnh nằm trong kho riêng tư và chỉ xem được qua đường dẫn ký có thời hạn, và một bước kiểm tra tự động ngăn khoá bí mật của backend lọt vào mã giao diện. Trong giai đoạn bảo vệ, khoá truy cập được đặt sẵn lúc dựng giao diện để hội đồng mở đường dẫn là dùng được ngay; nhóm chấp nhận điều này có chủ đích và sẽ đổi khoá sau buổi bảo vệ.
+
+%=====================================================================
+\section{Kiểm thử}
+\label{sec:kiem-thu}
+
+Kho mã có 146 tệp kiểm thử tự động viết bằng pytest. Nguyên tắc chung là logic quyết định được kiểm thử trên CPU, còn các phần phụ thuộc GPU được kiểm tra bằng hợp đồng nguồn (so mã băm tệp nguồn vLLM, phân tích cú pháp mã) và bằng các lần chạy thử trên GPU có lưu bằng chứng. Một số kết quả kiểm thử tiêu biểu được ghi trong nhật ký của dự án như sau. Bộ kiểm thử của bộ điều khiển theo chi phí (\texttt{tests/test\_hardware\_cost\_driven\_controller.py}) gồm 15 ca, phủ các tiêu chí nghiệm thu của đặc tả và các ca biên như trần $K$ không khớp giữa bộ điều khiển và engine, $\hat{\alpha}$ là NaN, và hồ sơ không đơn điệu. Bộ kiểm thử hợp đồng thực thi tương đồng gồm 14 ca. Bộ hồi quy ngoại tuyến gồm 17 nhóm tệp (bộ điều khiển, bộ lập kế hoạch, bảo vệ bộ nhớ, sổ nguồn gốc, khởi chạy, Modal) đạt 236 ca qua, 88 ca bỏ qua do thiếu GPU, 0 ca lỗi ngày 22/11/2026. Với web console, 171 ca kiểm thử API chạy trên PostgreSQL thật và 80 ca kiểm thử giao diện đều qua tại thời điểm hợp nhất ngày 23/11/2026. \CanBoSung{kết quả chạy toàn bộ bộ kiểm thử trên commit chốt của quyển}
+
+Trên GPU, công cụ dòng lệnh đã được chạy thử trên Modal A10G ngày 14--15/11/2026: đo hồ sơ ở batch 1 với $k = 0..4$ (275 bản ghi thô), khởi chạy chế độ thích ứng, nhận phản hồi ở \texttt{/health}, \texttt{/v1/models} và sinh văn bản thành công cho ba yêu cầu 128 token ở \texttt{max\_num\_seqs = 1}, quan sát được $K$ thay đổi giữa 0, 2 và 3 cùng phản hồi có nguồn gốc. Đây là kiểm thử chức năng; đánh giá hiệu năng được trình bày ở Chương~\ref{chap:thu-nghiem}.
+
+\section{Kết chương}
+
+Chương này đã trình bày hiện thực của FlexSDS: bộ điều khiển và mô hình chi phí không phụ thuộc vLLM, tầng tích hợp kế thừa bộ lập lịch bất đồng bộ của vLLM 0.30.0 kèm cơ chế quy phản hồi có kiểm tra mã nguồn, công cụ dòng lệnh đóng gói toàn bộ quy trình từ kiểm tra tương thích, đo hồ sơ đến khởi chạy có xác minh, cùng đầu nháp EAGLE-3.1 do nhóm huấn luyện, quy trình hoá đơn, bộ đo và web console. Chương~\ref{chap:thu-nghiem} dùng các thành phần này để đánh giá hệ thống.

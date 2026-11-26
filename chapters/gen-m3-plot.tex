@@ -1,0 +1,33 @@
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=3 by 1, horizontal sep=8mm, y descriptions at=edge left},
+  width=0.37\linewidth, height=48mm, xmode=log, log basis x=2, xtick={1,2,4,8,16,32},
+  xticklabels={1,2,4,8,16,32}, ymin=0.4, ymax=1.6, grid=major, grid style={gray!25},
+  xlabel={mức đồng thời $c$}, tick label style={font=\scriptsize}, label style={font=\footnotesize},
+  title style={font=\footnotesize}, legend style={font=\scriptsize}]
+\nextgroupplot[title={W1}, ylabel={hệ số tăng tốc}]
+\addplot[black, dashed, domain=1:32, samples=2, forget plot] {1};
+\addplot[blue, mark=square*, mark size=1.6pt] coordinates {(1,1.429) (2,1.390) (4,1.379) (8,1.295) (16,1.158) (32,0.948)};
+\addplot[red, mark=triangle*, mark size=2pt] coordinates {(1,1.448) (2,1.353) (4,1.309) (8,1.201) (16,1.017) (32,0.863)};
+\addplot[green!50!black, mark=*, mark size=1.6pt] coordinates {(1,1.415) (2,1.405) (4,1.303) (8,1.123) (16,0.911) (32,0.691)};
+\nextgroupplot[title={W2}]
+\addplot[black, dashed, domain=1:32, samples=2, forget plot] {1};
+\addplot[blue, mark=square*, mark size=1.6pt] coordinates {(1,1.353) (2,1.325) (4,1.309) (8,1.268) (16,1.181) (32,0.935)};
+\addplot[red, mark=triangle*, mark size=2pt] coordinates {(1,1.253) (2,1.114) (4,0.874) (8,0.756) (16,0.729) (32,0.669)};
+\addplot[green!50!black, mark=*, mark size=1.6pt] coordinates {(1,1.245) (2,1.214) (4,1.167) (8,1.063) (16,0.868) (32,0.647)};
+\nextgroupplot[title={W3}, legend to name=legfigm3]
+\addplot[black, dashed, domain=1:32, samples=2, forget plot] {1};
+\addplot[blue, mark=square*, mark size=1.6pt] coordinates {(1,1.022) (2,1.027) (4,1.028) (8,0.994) (16,0.928) (32,0.754)};
+\addlegendentry{static}
+\addplot[red, mark=triangle*, mark size=2pt] coordinates {(1,0.745) (2,0.709) (4,0.637) (8,0.581) (16,0.522) (32,0.474)};
+\addlegendentry{adaptive v0}
+\addplot[green!50!black, mark=*, mark size=1.6pt] coordinates {(1,1.238) (2,1.222) (4,1.183) (8,1.088) (16,0.931) (32,0.669)};
+\addlegendentry{eagle}
+\end{groupplot}
+\end{tikzpicture}
+
+\vspace{2pt}\pgfplotslegendfromname{legfigm3}
+\caption{Hệ số tăng tốc theo mức đồng thời trong chiến dịch M3-05 trên L4 (đường nét đứt: hoà vốn)}
+\label{fig:m3}
+\end{figure}
